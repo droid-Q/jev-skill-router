@@ -1,0 +1,8 @@
+{
+  "apiKey": "",
+  "model": "jev-latest",
+  "threshold": 0.8,
+  "maxSkills": 3,
+  "timeoutMs": 12000,
+  "codexBin": "codex"
+}

@@ -2,14 +2,6 @@
 
 [English](README.md) | **简体中文**
 
-一个 Codex 插件：每次提交用户消息时，由 [TypeSafe Jev](https://typesafe.ai/) 判断适合使用哪些 skills，再通过 `UserPromptSubmit` hook 将选择结果交给 Codex。
-
-```text
-用户消息 → Codex skills/list → Jev 相关性概率 → 选中的 SKILL.md 路径 → Codex
-```
-
-插件使用正式的生命周期 hook 自动完成选择。Codex 没有独立的 `SkillSelect` 事件，因此插件向模型上下文提供选择指令，不能直接替换或强制约束 Codex 内部的 skill 注册表，也不会移除最初注入的 skill 目录或保证节省 token。
-
 ## 运行要求
 
 - 支持插件 hooks、`UserPromptSubmit` 和 app-server `skills/list` 的 Codex CLI；开发基于 **0.154.0**。

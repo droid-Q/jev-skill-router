@@ -2,14 +2,6 @@
 
 **English** | [简体中文](README-cn.md)
 
-A Codex plugin that asks [TypeSafe Jev](https://typesafe.ai/) which skills fit each user prompt, then supplies the selected skills to Codex through a `UserPromptSubmit` hook.
-
-```text
-User prompt → Codex skills/list → Jev relevance probabilities → selected SKILL.md paths → Codex
-```
-
-This is automatic routing through a supported lifecycle hook. Codex does not expose a dedicated `SkillSelect` event: the plugin adds selection instructions to the model's context, rather than replacing or enforcing Codex's internal skill registry. It does not remove the initial skill catalog from the context or guarantee token savings.
-
 ## Requirements
 
 - Codex CLI with plugin hooks, `UserPromptSubmit`, and app-server `skills/list`. Developed against **0.154.0**.

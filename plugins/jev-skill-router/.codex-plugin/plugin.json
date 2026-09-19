@@ -1,15 +1,15 @@
 {
   "name": "jev-skill-router",
-  "version": "0.1.0",
-  "description": "Automatically route Codex skill selection through TypeSafe Jev on each user prompt.",
+  "version": "0.2.0",
+  "description": "Route Codex skills with TypeSafe Jev and inspect local selection history in a web dashboard.",
   "author": {
     "name": "droid-Q"
   },
   "repository": "https://github.com/droid-Q/jev-skill-router",
   "interface": {
     "displayName": "Jev Skill Router",
-    "shortDescription": "Let Jev select relevant skills before each turn.",
-    "longDescription": "A UserPromptSubmit hook that evaluates enabled skills with TypeSafe Jev and supplies the selected skill paths to Codex. Explicit skill requests and existing permissions remain authoritative.",
+    "shortDescription": "Jev skill routing with local selection analytics.",
+    "longDescription": "A UserPromptSubmit hook that selects relevant skills with TypeSafe Jev, records decisions locally, and provides a bilingual web dashboard for selection rates, trends, and routing history. Explicit skill requests and existing permissions remain authoritative.",
     "developerName": "droid-Q",
     "category": "Productivity",
     "capabilities": [],

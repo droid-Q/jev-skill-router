@@ -11,10 +11,11 @@ const temporary = await mkdtemp(join(tmpdir(), 'jev-router-test-'));
 const cwd = await realpath(temporary);
 try {
   const configFile = join(cwd, 'config.json');
-  await writeFile(configFile, JSON.stringify({ apiKey: 'fixture-key', threshold: 0.8, maxSkills: 2 }));
+  await writeFile(configFile, JSON.stringify({ apiKey: 'fixture-key', threshold: 0.8, maxSkills: 2, dataDir: join(cwd, 'history') }));
   const config = await loadConfig({ JEV_SKILL_ROUTER_CONFIG: configFile });
   assert.equal((await loadConfig({ JEV_SKILL_ROUTER_CONFIG: configFile, TYPESAFE_API_KEY: 'override' })).apiKey, 'override');
-  for (const settings of [{ threshold: 0.5 }, { maxSkills: 0 }, { timeoutMs: 30000 }, { unexpected: true }, { apiKey: 'bad\nkey' }]) {
+  assert.equal(config.recordSelections, true);
+  for (const settings of [{ threshold: 0.5 }, { maxSkills: 0 }, { timeoutMs: 30000 }, { unexpected: true }, { apiKey: 'bad\nkey' }, { recordSelections: 'true' }, { dataDir: 'relative' }]) {
     await writeFile(configFile, JSON.stringify(settings));
     await assert.rejects(loadConfig({ JEV_SKILL_ROUTER_CONFIG: configFile }), /JEV_CONFIG_INVALID/);
   }
@@ -85,12 +86,17 @@ createInterface({input:process.stdin}).on('line', line => {
   assert(context.includes('tools:review') && context.includes('testing'));
   assert(context.includes('Explicit user-requested skills') && context.includes('Already-active skills'));
   assert(!context.includes('manual') && !context.includes('disabled'));
+  const recordingFailure = await route(input, config, { ...dependencies, record: async () => { throw new Error('secret disk path'); } });
+  assert.deepEqual(recordingFailure.hookSpecificOutput, result.hookSpecificOutput);
+  assert.match(recordingFailure.systemMessage, /JEV_RECORD_UNAVAILABLE/);
+  assert(!recordingFailure.systemMessage.includes('secret disk path'));
+  await route(input, { ...config, recordSelections: false }, { ...dependencies, record: async () => assert.fail('Recording is disabled') });
   assert.deepEqual(await bundledRoute(input, config, dependencies), result);
   const limited = await route(input, { ...config, maxSkills: 1 }, dependencies);
   assert(!limited.hookSpecificOutput.additionalContext.includes('"testing"'));
   const none = await route(input, { ...config, threshold: 1 }, dependencies);
   assert(none.hookSpecificOutput.additionalContext.includes('No optional skill met'));
-  assert.equal(calls, 4);
+  assert.equal(calls, 6);
   assert.deepEqual(await route({ hook_event_name: 'Stop' }, config), {});
   await assert.rejects(route(input, { ...config, apiKey: '' }, dependencies), /JEV_NO_API_KEY/);
   await assert.rejects(route({ ...input, cwd: 'relative' }, config), /JEV_INPUT_INVALID/);
@@ -136,7 +142,7 @@ createInterface({input:process.stdin}).on('line', line => {
 
   const bundle = join(cwd, 'standalone-router.mjs');
   await writeFile(bundle, await readFile(resolve('plugins/jev-skill-router/scripts/router.mjs')));
-  const isolatedEnv = { ...process.env, TYPESAFE_API_KEY: '', JEV_SKILL_ROUTER_CONFIG: configFile, JEV_CODEX_BIN: codexBin, JEV_SKILL_ROUTER_DISABLED: '0' };
+  const isolatedEnv = { ...process.env, TYPESAFE_API_KEY: '', JEV_SKILL_ROUTER_CONFIG: configFile, JEV_CODEX_BIN: codexBin, JEV_SKILL_ROUTER_DISABLED: '0', JEV_SKILL_ROUTER_DATA_DIR: config.dataDir };
   const listed = await promisify(execFile)(process.execPath, [bundle, '--list'], {
     cwd, env: isolatedEnv,
   });
@@ -161,6 +167,14 @@ createInterface({input:process.stdin}).on('line', line => {
   const hooks = JSON.parse(await readFile('plugins/jev-skill-router/hooks/hooks.json', 'utf8'));
   assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].command, 'node "${PLUGIN_ROOT}/scripts/router.mjs"');
   assert.equal(JSON.parse(await readFile('.agents/plugins/marketplace.json', 'utf8')).plugins[0].source.path, './plugins/jev-skill-router');
+  const history = await readFile(join(config.dataDir, new Date().toISOString().slice(0, 10) + '.jsonl'), 'utf8');
+  assert(!history.includes(input.prompt) && !history.includes('fixture-key') && !history.includes('Private skill body'));
+  const records = history.trim().split('\n').map(line => JSON.parse(line));
+  assert(records.some(record => record.status === 'selected' && record.selected[0].probability === 0.98));
+  assert(records.some(record => record.status === 'none'));
+  assert(records.some(record => record.status === 'no_candidates'));
+  assert(records.some(record => record.status === 'error' && record.errorCode === 'JEV_NO_API_KEY'));
+  assert(records.some(record => record.status === 'error' && record.errorCode === 'JEV_TIMEOUT'));
   console.log('Self-check passed: catalog RPC, enabled/implicit policies, alias deduplication, bundled CLI, Jev request/response, multi-skill selection, batching, timeout and safe fallback.');
 } finally {
   await rm(temporary, { recursive: true, force: true });

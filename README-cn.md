@@ -2,6 +2,27 @@
 
 [English](README.md) | **简体中文**
 
+## 功能
+
+- **Jev skill 选择**：评估符合条件的 skills，将选中的名称、路径和相关性概率交给 Codex。
+- **本地选择记录**：记录已选择、未匹配、无候选项和路由失败，以及对应项目、任务、模型、阈值与耗时。
+- **Web 统计页面**：查看选择率、每日趋势、skill 排行、平均相关性和可展开的记录详情，支持时间、项目、skill 与结果筛选。
+- **中英文界面**：支持语言切换、明暗主题和手机浏览。
+- **记录无需额外服务**：hook 自行写入历史，只在需要查看时启动 Web 页面。
+
+### 页面预览
+
+以下截图使用**演示数据**，不代表 Jev 实测准确率或真实用户历史。视觉风格参考 [TypeSafe AI](https://typesafe.ai/)。
+
+![Jev Skill Router 中文统计页面，使用演示数据](docs/images/dashboard-cn.png)
+
+<details>
+<summary>查看单次路由决策详情</summary>
+
+![单次路由详情，包含 skill 路径和相关性概率，使用演示数据](docs/images/routing-detail-cn.webp)
+
+</details>
+
 ## 运行要求
 
 - 支持插件 hooks、`UserPromptSubmit` 和 app-server `skills/list` 的 Codex CLI；开发基于 **0.154.0**。
@@ -30,7 +51,8 @@ codex plugin add jev-skill-router@jev-skill-router
   "threshold": 0.8,
   "maxSkills": 3,
   "timeoutMs": 12000,
-  "codexBin": "codex"
+  "codexBin": "codex",
+  "recordSelections": true
 }
 ```
 
@@ -50,8 +72,55 @@ chmod 600 ~/.config/jev-skill-router/config.json
 | `maxSkills` | `3` | 最多选择的可选 skills 数量，范围 `1`～`20`。 |
 | `timeoutMs` | `12000` | skill 发现和 API 调用共用的总超时，范围 `100`～`20000` 毫秒。 |
 | `codexBin` | `codex` | 可执行程序名或绝对路径，不包含 shell 参数；`JEV_CODEX_BIN` 优先。 |
+| `recordSelections` | `true` | 是否在本机保存路由历史；设为 `false` 停止新增记录，已有记录保留。 |
+| `dataDir` | `~/.local/share/jev-skill-router` | 历史目录；自定义值必须是**绝对路径**，JSON 中不会展开 `~`；`JEV_SKILL_ROUTER_DATA_DIR` 优先。 |
 
 通过 `JEV_SKILL_ROUTER_CONFIG` 指定其他配置文件，或设置 `JEV_SKILL_ROUTER_DISABLED=1` 停用选择功能。插件不会自行写入配置或保存用户消息。
+
+## Web 页面与历史记录
+
+在仓库目录下，使用 Node.js 22+ 执行：
+
+```sh
+npm run dashboard
+```
+
+打开 [http://127.0.0.1:4318](http://127.0.0.1:4318)。该命令直接使用已提交的打包脚本，查看页面无需 `npm install`。如需指定端口：
+
+```sh
+npm run dashboard -- --port 4320
+```
+
+也可用 Node.js 执行已安装插件的 `scripts/router.mjs --dashboard`。插件根目录以 `/hooks` 显示的实际路径为准，版本更新会改变缓存目录。页面进程与 hook 需要使用同一份配置和历史目录。页面服务只读，仅监听 `127.0.0.1`，不加载外部资源，也不请求 Jev。浏览时保持终端运行，按 `Ctrl+C` 停止。
+
+概览提供今天／最近 7／30／90 天与项目筛选，展示选择次数、选择命中率、选中过的 skill 数量、平均耗时和每日结果柱状图。排行展示每个 skill 的选中次数、选择率、平均相关性概率及最近选中时间。点击 skill 可筛选记录，展开记录可查看完整路径、概率、候选数量、模型、阈值、任务 ID 和安全错误码。历史支持分页。页面可见且空闲时每 15 秒刷新；聚焦控件或展开详情期间暂停自动刷新。
+
+**统计口径：**“成功评估”指结果为 `selected` 或 `none` 的请求。概览命中率为至少选中一个 skill 的请求数除以成功评估数；单个 skill 的选择率为它的选中次数除以相同时间／项目范围内的成功评估数。搜索和结果筛选只影响列表，不改变统计分母。一次请求可选中多个 skills，因此各 skill 的选择率之和不一定是 100%。平均相关性只统计被选中的次数；失败与无候选项单独显示。平均耗时包含所有已记录路由尝试，不包含日志写入耗时。日期按 UTC 分组，单条时间使用浏览器本地时区。
+
+Skills 按解析后的 `SKILL.md` 完整路径区分；不同路径或已安装版本会分别统计。
+
+这些数据是**选择统计**，不能证明 Codex 实际执行了某个 skill。安装记录功能之前的历史请求无法补录。
+
+记录按天追加到 `~/.local/share/jev-skill-router/YYYY-MM-DD.jsonl`。支持相应权限的系统中，新目录使用 `0700`，新文件使用 `0600`。每条记录保存时间、生成的 ID、工作目录、可选任务 ID、路由配置、候选数量、耗时、结果、选中的名称／路径／概率和经过清理的错误码；**不保存**用户消息正文、对话记录、skill 正文、API Key 或原始接口错误。停用路由、仅查询目录的 `--list` 调用、无效配置及无效 hook 输入不会生成选择记录。历史写入失败不影响路由；路由本身成功时会显示简短的记录失败提示。
+
+日志不会自动删除。页面最多查看 90 天；单次查询超过 64 MiB 时会提示缩短范围或归档旧的每日文件。损坏或不完整的行会被跳过，并显示数量。关闭 Web 页面不会停止 hook 记录。
+
+无需密钥或真实历史即可复现文档中的演示页面：
+
+```sh
+npm run dashboard:demo
+```
+
+打开 [http://127.0.0.1:4319](http://127.0.0.1:4319)。演示记录在独立临时目录生成，页面明确标记为**演示数据**，按 `Ctrl+C` 后清理该目录。演示不会读取 API 配置，也不会请求 Codex/Jev。可用 `npm run dashboard:demo -- 4321` 指定端口。
+
+### 更新已有安装
+
+```sh
+codex plugin marketplace upgrade jev-skill-router
+codex plugin add jev-skill-router@jev-skill-router
+```
+
+若 `/hooks` 提示，审查并信任更新后的 hook，然后新建 Codex 任务。历史记录位于插件缓存之外，升级时会保留。
 
 ## 工作方式
 
@@ -93,7 +162,7 @@ node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit"
 
 这会将示例消息和本机符合条件的 skill 元数据发送给 TypeSafe。成功时返回 `hookSpecificOutput.additionalContext`，降级时返回 `systemMessage`。hook 降级时仍以成功状态退出，让原任务继续进行。
 
-自检使用合成 Jev 响应，覆盖 app-server 协议、策略过滤、链接去重、打包后 CLI、请求结构、多 skill 选择、分批、无效响应、超时和安全降级。它**不代表** Jev 选择准确率评测或真实 API 访问验证。
+自检使用合成 Jev 响应和临时文件，覆盖 app-server 协议、策略过滤、链接去重、打包后 CLI、请求结构、多 skill 选择、分批、无效响应、超时、安全降级、私密与并发记录、历史筛选、统计分母、分页及本地 HTTP 访问限制。HTTP 检查需要允许监听临时本地端口。它**不代表** Jev 选择准确率评测或真实 API 访问验证。
 
 ## 参考资料
 

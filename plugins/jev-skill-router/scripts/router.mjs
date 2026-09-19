@@ -998,14 +998,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text2, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text;
+        return text2;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent.length);
-      if (text.length <= endStep)
-        return text;
+      if (text2.length <= endStep)
+        return text2;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent.length;
@@ -1022,14 +1022,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text, i, indent.length);
+        i = consumeMoreIndentedLines(text2, i, indent.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text[i += 1]; ) {
+      for (let ch; ch = text2[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text[i + 1]) {
+          switch (text2[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1046,12 +1046,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text, i, indent.length);
+            i = consumeMoreIndentedLines(text2, i, indent.length);
           end = i + indent.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text[i + 1];
+            const next = text2[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1063,12 +1063,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text[i += 1];
+                ch = text2[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text;
+                return text2;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1083,39 +1083,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text;
+        return text2;
       if (onFold)
         onFold();
-      let res = text.slice(0, folds[0]);
+      let res = text2.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text.length;
+        const end2 = folds[i2 + 1] || text2.length;
         if (fold === 0)
           res = `
-${indent}${text.slice(0, end2)}`;
+${indent}${text2.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text[fold]}\\`;
+            res += `${text2[fold]}\\`;
           res += `
-${indent}${text.slice(fold + 1, end2)}`;
+${indent}${text2.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text, i, indent) {
+    function consumeMoreIndentedLines(text2, i, indent) {
       let end = i;
       let start = i + 1;
-      let ch = text[start];
+      let ch = text2[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent) {
-          ch = text[++i];
+          ch = text2[++i];
         } else {
           do {
-            ch = text[++i];
+            ch = text2[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text[start];
+          ch = text2[start];
         }
       }
       return end;
@@ -7364,19 +7364,408 @@ var require_dist = __commonJS({
 // src/router.mjs
 var import_yaml = __toESM(require_dist(), 1);
 import { spawn } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile as readFile2, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute as isAbsolute2, join as join2, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
+
+// src/records.mjs
+import { appendFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { join, isAbsolute } from "node:path";
+var DAY = 864e5;
+var statuses = ["selected", "none", "no_candidates", "error"];
+var text = (value, limit) => typeof value === "string" && value.length <= limit;
+function selectionRecord(value) {
+  if (!value || value.version !== 1 || !text(value.id, 100) || !value.id || !text(value.timestamp, 30) || !Number.isFinite(Date.parse(value.timestamp)) || new Date(value.timestamp).toISOString() !== value.timestamp || !text(value.cwd, 8192) || !isAbsolute(value.cwd) || !(value.sessionId === null || text(value.sessionId, 200)) || !text(value.model, 100) || !/^jev-[\w.-]+$/u.test(value.model) || !Number.isFinite(value.threshold) || value.threshold <= 0.5 || value.threshold > 1 || !Number.isInteger(value.maxSkills) || value.maxSkills < 1 || value.maxSkills > 20 || !(value.candidateCount === null || Number.isInteger(value.candidateCount) && value.candidateCount >= 0) || !Number.isFinite(value.durationMs) || value.durationMs < 0 || !statuses.includes(value.status) || !Array.isArray(value.selected) || value.selected.length > value.maxSkills || (value.status === "error" ? !/^JEV_[A-Z0-9_]{1,80}$/u.test(value.errorCode) : value.errorCode !== null)) return null;
+  const selected = [];
+  const paths = /* @__PURE__ */ new Set();
+  for (const skill of value.selected) {
+    if (!skill || !text(skill.name, 512) || !skill.name || !text(skill.path, 8192) || !isAbsolute(skill.path) || !Number.isFinite(skill.probability) || skill.probability < value.threshold || skill.probability > 1 || paths.has(skill.path)) return null;
+    paths.add(skill.path);
+    selected.push({ name: skill.name, path: skill.path, probability: skill.probability });
+  }
+  if (value.status === "selected" !== selected.length > 0 || ["selected", "none"].includes(value.status) && !(value.candidateCount > 0) || value.status === "no_candidates" && value.candidateCount !== 0 || selected.length && selected.length > value.candidateCount) return null;
+  return Object.fromEntries([
+    "version",
+    "id",
+    "timestamp",
+    "cwd",
+    "sessionId",
+    "model",
+    "threshold",
+    "maxSkills",
+    "candidateCount",
+    "durationMs",
+    "status",
+    "errorCode"
+  ].map((key) => [key, value[key]]).concat([["selected", selected]]));
+}
+async function appendSelection(dataDir, event) {
+  const record = selectionRecord(event);
+  if (!record) throw new Error("JEV_RECORD_INVALID");
+  const line = Buffer.from(JSON.stringify(record) + "\n");
+  if (line.length > 128 * 1024) throw new Error("JEV_RECORD_TOO_LARGE");
+  await mkdir(dataDir, { recursive: true, mode: 448 });
+  await appendFile(join(dataDir, record.timestamp.slice(0, 10) + ".jsonl"), line, { mode: 384 });
+}
+async function readSelections(dataDir, days, now = /* @__PURE__ */ new Date()) {
+  const end = (/* @__PURE__ */ new Date(now.toISOString().slice(0, 10) + "T00:00:00.000Z")).getTime() + DAY;
+  const start = end - days * DAY;
+  const first = new Date(start).toISOString().slice(0, 10);
+  const last = new Date(end - 1).toISOString().slice(0, 10);
+  let files;
+  try {
+    files = await readdir(dataDir);
+  } catch (error) {
+    if (error.code === "ENOENT") return { events: [], skipped: 0, first, last };
+    throw error;
+  }
+  const events = [];
+  let bytes = 0;
+  let skipped = 0;
+  for (const name of files.filter((name2) => /^\d{4}-\d{2}-\d{2}\.jsonl$/u.test(name2) && name2.slice(0, 10) >= first && name2.slice(0, 10) <= last).sort()) {
+    const path = join(dataDir, name);
+    bytes += (await stat(path)).size;
+    if (bytes > 64 * 1024 * 1024) throw Object.assign(new Error("JEV_HISTORY_TOO_LARGE"), { code: "JEV_HISTORY_TOO_LARGE" });
+    for (const line of (await readFile(path, "utf8")).split("\n")) {
+      if (!line.trim()) continue;
+      let record;
+      try {
+        record = selectionRecord(JSON.parse(line));
+      } catch {
+      }
+      if (!record) {
+        skipped++;
+        continue;
+      }
+      if (Date.parse(record.timestamp) >= start && Date.parse(record.timestamp) < end) events.push(record);
+    }
+  }
+  events.sort((a, b) => b.timestamp.localeCompare(a.timestamp) || b.id.localeCompare(a.id));
+  return { events, skipped, first, last };
+}
+function summarize(history, { days, project = "", search = "", status = "", page = 1 }) {
+  const events = history.events.filter((event) => !project || event.cwd === project);
+  const summary = {
+    routes: events.length,
+    evaluated: 0,
+    withSkills: 0,
+    noMatch: 0,
+    noCandidates: 0,
+    errors: 0,
+    selections: 0,
+    uniqueSkills: 0,
+    avgDurationMs: null,
+    selectionRate: null
+  };
+  const skills = /* @__PURE__ */ new Map();
+  const trend = Array.from({ length: days }, (_, index) => ({
+    date: new Date(Date.parse(history.first) + index * DAY).toISOString().slice(0, 10),
+    selected: 0,
+    none: 0,
+    no_candidates: 0,
+    error: 0
+  }));
+  for (const event of events) {
+    const day = trend.find((day2) => day2.date === event.timestamp.slice(0, 10));
+    if (day) day[event.status]++;
+    if (["selected", "none"].includes(event.status)) summary.evaluated++;
+    summary[{ selected: "withSkills", none: "noMatch", no_candidates: "noCandidates", error: "errors" }[event.status]]++;
+    for (const skill of event.selected) {
+      summary.selections++;
+      const row = skills.get(skill.path) ?? { name: skill.name, path: skill.path, count: 0, probabilitySum: 0, lastSelected: event.timestamp };
+      row.count++;
+      row.probabilitySum += skill.probability;
+      skills.set(skill.path, row);
+    }
+  }
+  summary.uniqueSkills = skills.size;
+  if (events.length) summary.avgDurationMs = Math.round(events.reduce((sum, event) => sum + event.durationMs, 0) / events.length);
+  if (summary.evaluated) summary.selectionRate = summary.withSkills / summary.evaluated;
+  const needle = search.toLocaleLowerCase();
+  const matches = (skill) => (skill.name + "\n" + skill.path).toLocaleLowerCase().includes(needle);
+  const ranking = [...skills.values()].filter(matches).map(({ probabilitySum, ...skill }) => ({
+    ...skill,
+    averageProbability: probabilitySum / skill.count,
+    selectionRate: skill.count / summary.evaluated
+  })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const matchingEvents = events.filter((event) => (!status || event.status === status) && (!needle || event.selected.some(matches)));
+  const pageSize = 25;
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(matchingEvents.length / pageSize)));
+  return {
+    summary,
+    trend,
+    skills: ranking,
+    projects: [...new Set(history.events.map((event) => event.cwd))].sort(),
+    events: matchingEvents.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    page: currentPage,
+    pageSize,
+    totalEvents: matchingEvents.length,
+    skipped: history.skipped,
+    first: history.first,
+    last: history.last
+  };
+}
+
+// src/dashboard.mjs
+import { createServer } from "node:http";
+import { createHash } from "node:crypto";
+
+// src/dashboard-page.mjs
+var dashboard_page_default = String.raw`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Jev — Skill observatory</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--paper:#fefefe;--ink:#1e1e1e;--muted:#626262;--line:#cecece;--soft:#f2f2f0;--pink:#f386a1;--blue:#d9efff;--error:#92334f;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;--sans:"Helvetica Neue",Helvetica,"PingFang SC","Microsoft YaHei",sans-serif;color-scheme:light}
+:root[data-theme=dark]{--paper:#191919;--ink:#f3f3ee;--muted:#b6b6b2;--line:#494949;--soft:#252525;--pink:#f386a1;--blue:#5b7180;--error:#ffb3c7;color-scheme:dark}
+*{box-sizing:border-box}html{scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;text-wrap:pretty}button,input,select{font:inherit;color:inherit}button,select{cursor:pointer}button,a,summary,input,select{touch-action:manipulation}button{border:1px solid var(--line);background:var(--paper);padding:9px 16px;min-height:42px;transition:background .15s,color .15s}button:hover{background:var(--soft)}button:active{transform:translateY(1px)}button:disabled{opacity:.45;cursor:default}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--ink);outline-offset:4px}button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}button.primary:hover{opacity:.85}h1,h2,p{margin:0}h2{font-size:24px;font-weight:500;letter-spacing:-.7px}.mono,.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.05em}.eyebrow{text-transform:uppercase}.muted{color:var(--muted)}.hidden,[hidden]{display:none!important}.skip{position:absolute;left:16px;top:-70px;background:var(--ink);color:var(--paper);padding:12px;z-index:10}.skip:focus{top:12px}
+header{border-bottom:1px solid var(--line)}.nav{max-width:1440px;margin:auto;padding:17px 40px;display:flex;align-items:center;gap:36px}.brand{display:flex;align-items:center;gap:12px;white-space:nowrap}.wordmark{font-size:32px;line-height:1;font-weight:700;letter-spacing:-2px}.brand-label{border-left:1px solid var(--line);padding-left:12px;font-size:13px}.nav-links{display:flex;gap:28px;margin-left:40px;font-size:14px}.nav-tools{margin-left:auto;display:flex;gap:8px}.nav-tools button{font-family:var(--mono);font-size:12px;padding:7px 12px;min-height:36px}.active-lang{text-decoration:underline;text-underline-offset:4px}main{max-width:1440px;margin:auto;padding:0 40px 40px}.hero{display:grid;grid-template-columns:1fr 350px;gap:32px;padding:48px 0 38px;position:relative}.hero h1{font-size:clamp(42px,5.4vw,78px);font-weight:500;letter-spacing:-4px;line-height:1.05;margin:22px 0 20px}.hero p{max-width:640px;color:var(--muted);font-size:16px}.hero-art{position:relative;min-height:180px;overflow:hidden;align-self:stretch;border:1px solid var(--line);background:var(--blue)}.hero-art:before{content:"";position:absolute;inset:0;background-image:radial-gradient(var(--pink) 1.7px,transparent 1.7px);background-size:6px 6px;clip-path:polygon(0 0,74% 0,54% 20%,89% 34%,66% 54%,92% 76%,50% 100%,0 100%)}.hero-art:after{content:"";position:absolute;inset:12px;border:1px solid var(--paper);opacity:.8}.art-label{position:absolute;bottom:22px;left:22px;right:22px;z-index:1;background:var(--paper);border:1px solid var(--ink);box-shadow:3px 3px 0 var(--ink)}.art-label b{display:block;padding:5px 10px;background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:11px;font-weight:400}.art-label span{display:block;padding:10px;font-size:20px;letter-spacing:-.5px}.demo-banner,.notice{border:1px solid var(--line);background:var(--soft);padding:12px 16px;margin-bottom:18px;font-size:13px}.demo-banner{background:var(--blue);border-color:var(--ink)}.notice.error{color:var(--error);border-color:var(--pink)}
+.toolbar{display:flex;gap:12px;align-items:flex-end;border-top:1px solid var(--ink);padding:20px 0}.field{display:grid;gap:6px;min-width:140px}.field label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}input,select{border:1px solid var(--line);background:var(--paper);padding:9px 12px;min-height:42px;max-width:100%;border-radius:0}select{padding-right:30px}#project{max-width:360px}.toolbar-end{margin-left:auto;display:flex;align-items:center;gap:20px}.live{font-family:var(--mono);font-size:11px;display:flex;align-items:center;gap:7px}.live:before{content:"";width:6px;height:6px;background:var(--ink)}.live.off:before{background:var(--pink)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--ink);margin-bottom:28px}.stat{padding:22px 24px;border-right:1px solid var(--line)}.stat:last-child{border:0}.stat-top{display:flex;justify-content:space-between;color:var(--muted)}.stat-number{font-size:48px;font-weight:500;line-height:1.15;letter-spacing:-2px;margin:12px 0 6px;font-variant-numeric:tabular-nums}.stat p{font-size:12px;color:var(--muted)}.panel{border:1px solid var(--line);padding:24px}.panel-heading{display:flex;align-items:start;justify-content:space-between;gap:20px;margin-bottom:18px}.panel-heading p{font-size:12px;color:var(--muted);margin-top:5px}.charts{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:20px;margin-bottom:38px}.legend{display:flex;gap:15px;flex-wrap:wrap;font-size:11px;color:var(--muted)}.legend span{display:flex;gap:6px;align-items:center}.swatch{display:inline-block;width:8px;height:8px;background:var(--ink)}.swatch.none{background:var(--blue);border:1px solid var(--line)}.swatch.error{background:var(--pink)}.swatch.no_candidates{background:var(--line)}.chart{height:130px;display:flex;gap:5px;align-items:stretch;border-bottom:1px solid var(--line);background:repeating-linear-gradient(to top,transparent 0,transparent calc(50% - 1px),var(--soft) calc(50% - 1px),var(--soft) 50%)}.bar{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;position:relative}.bar-stack{display:flex;flex-direction:column;justify-content:flex-end;min-height:1px}.bar-part{min-height:0;display:block}.bar-part.selected{background:var(--ink)}.bar-part.none{background:var(--blue)}.bar-part.error{background:var(--pink)}.bar-part.no_candidates{background:var(--line)}.bar:hover .bar-stack{opacity:.7}.chart-labels{display:flex;justify-content:space-between;color:var(--muted);margin-top:10px}.breakdown{display:grid;gap:14px}.breakdown-row{display:grid;grid-template-columns:1fr auto;align-items:center;font-size:13px}.breakdown-row span{display:flex;align-items:center;gap:8px}.breakdown-row strong{font-family:var(--mono);font-weight:400}.breakdown-note{border-top:1px solid var(--line);margin-top:18px;padding-top:12px;color:var(--muted);font-size:11px}
+.section{margin-top:32px}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:16px}.section-heading .eyebrow{color:var(--muted);margin-bottom:4px}.list-controls{display:flex;gap:10px;align-items:center}.list-controls input{width:220px}.table-wrap{overflow-x:auto;border-top:1px solid var(--ink);border-bottom:1px solid var(--line)}table{border-collapse:collapse;width:100%;text-align:left}th{font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.04em;padding:12px 14px;background:var(--soft);white-space:nowrap}td{padding:13px 14px;border-top:1px solid var(--line);font-size:13px;vertical-align:middle}th:first-child,td:first-child{padding-left:0;background:var(--paper);width:38px;color:var(--muted)}th:nth-child(2),td:nth-child(2){padding-left:8px}tbody tr:hover{background:var(--soft)}.skill-name{font-size:14px;font-weight:500;padding:0;min-height:28px;background:none;border:0;text-align:left;overflow-wrap:anywhere}.skill-name:hover{background:none;text-decoration:underline}.skill-path{font-family:var(--mono);font-size:10px;color:var(--muted);overflow-wrap:anywhere;max-width:480px}.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}.rate-cell{min-width:150px}.rate{display:flex;align-items:center;gap:12px}.rate meter{width:80px;height:5px;border:0;border-radius:0;background:var(--soft)}meter::-webkit-meter-bar{background:var(--soft);border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--pink)}meter::-moz-meter-bar{background:var(--pink)}.section-foot{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-top:12px;font-size:11px;color:var(--muted)}.section-foot button{min-height:30px;padding:3px 10px;font-size:11px}.empty{text-align:center;padding:38px 20px;color:var(--muted);font-size:14px;border:1px dashed var(--line)}.empty b{display:block;color:var(--ink);font-size:18px;font-weight:500;margin-bottom:5px}.empty code{display:block;margin-top:14px;overflow-wrap:anywhere;font-size:12px}
+.log-head,.log-entry summary{display:grid;grid-template-columns:160px minmax(110px,1fr) minmax(180px,2fr) 90px 115px 20px;gap:14px;align-items:center}.log-head{background:var(--soft);border-top:1px solid var(--ink);padding:12px 16px;font-family:var(--mono);font-size:10px;text-transform:uppercase;color:var(--muted)}.log-entry{border-bottom:1px solid var(--line)}.log-entry summary{padding:15px 16px;cursor:pointer;list-style:none;font-size:12px}.log-entry summary::-webkit-details-marker{display:none}.log-entry summary:hover{background:var(--soft)}.log-entry summary:after{content:"+";font-family:var(--mono);font-size:18px}.log-entry[open] summary:after{content:"−"}.log-entry[open]{background:var(--soft)}.log-time{font-family:var(--mono);font-size:11px;color:var(--muted)}.log-project{font-weight:500;overflow-wrap:anywhere}.tags{display:flex;gap:5px;flex-wrap:wrap}.tag{border:1px solid var(--line);padding:3px 7px;background:var(--paper);font-family:var(--mono);font-size:10px;overflow-wrap:anywhere;max-width:100%}.status{display:inline-flex;align-items:center;gap:6px;font-size:11px}.record-body{border-top:1px dashed var(--line);padding:18px 24px}.record-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}.record-meta dt{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:4px}.record-meta dd{margin:0;font-size:12px;overflow-wrap:anywhere}.record-skills{display:grid;gap:10px}.record-skill{font-family:var(--mono);font-size:11px;overflow-wrap:anywhere}.record-skill b{font-size:12px;display:block;margin-bottom:3px}.record-error{color:var(--error);font-family:var(--mono);font-size:12px}.pagination{display:flex;gap:12px;align-items:center}.pagination button{min-height:36px;padding:5px 12px}.privacy{margin-top:40px;padding:20px 0;border-top:1px solid var(--ink);display:flex;justify-content:space-between;gap:25px;font-size:11px;color:var(--muted)}.privacy code{font-family:var(--mono);overflow-wrap:anywhere}.privacy p{max-width:520px}.footer-mark{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+@media(min-width:1500px){.hero h1{font-size:78px}}@media(max-width:1000px){.nav{padding:16px 24px;gap:24px}.nav-links{margin-left:0;gap:16px}main{padding:0 24px 24px}.hero{grid-template-columns:1fr 250px}.hero h1{letter-spacing:-2px}.charts{grid-template-columns:minmax(0,1fr) 250px;gap:14px}.stat{padding:20px 16px}.stat-number{font-size:40px}.panel{padding:20px}.log-head,.log-entry summary{grid-template-columns:125px minmax(85px,1fr) minmax(150px,2fr) 70px 100px 12px;gap:8px}.rate-cell{min-width:125px}.rate meter{width:55px}.last-column{display:none}.skill-path{max-width:350px}}
+@media(max-width:720px){.nav{padding:14px 18px;gap:12px}.nav-links{display:none}.brand-label{font-size:11px}.wordmark{font-size:29px}.nav-tools button{padding:6px 8px}main{padding:0 18px 20px}.hero{grid-template-columns:1fr;padding:30px 0 26px;gap:18px}.hero h1{font-size:48px;letter-spacing:-2.6px;margin:16px 0}.hero p{font-size:14px}.hero-art{display:none}.toolbar{flex-wrap:wrap;gap:12px}.field{min-width:0;flex:1}.field select{width:100%}#project{max-width:100%;width:100%}.toolbar-end{margin-left:0;width:100%;justify-content:space-between}.stats{grid-template-columns:repeat(2,1fr);margin-bottom:18px}.stat{padding:18px}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.stat-number{font-size:40px}.charts{grid-template-columns:1fr;gap:16px;margin-bottom:26px}.panel{padding:18px}.chart{gap:3px;height:115px}.breakdown{grid-template-columns:1fr 1fr;gap:12px 20px}.breakdown-note{margin-top:15px}.panel-heading{gap:12px}.panel-heading .mono{font-size:10px}.section-heading{flex-wrap:wrap;align-items:flex-end}.list-controls{width:100%}.list-controls input{width:100%}th,td{padding:12px 10px}.rate-cell{min-width:100px}.rate meter{width:36px}.probability-column{display:none}.skill-path{max-width:240px;font-size:9px}h2{font-size:22px}.section-foot{align-items:flex-start;line-height:1.6}.log-head{display:none}.log-entry:first-child{border-top:1px solid var(--ink)}.log-entry summary{grid-template-columns:1fr auto 14px;gap:10px;padding:14px 5px}.log-time{grid-column:1}.log-project{grid-column:1;grid-row:2}.tags{grid-column:1/3;grid-row:3}.log-duration{grid-column:2;grid-row:2}.log-status{grid-column:2;grid-row:1}.log-entry summary:after{grid-column:3;grid-row:1/3}.record-body{padding:16px}.record-meta{grid-template-columns:1fr 1fr;gap:14px}.privacy{flex-direction:column;gap:14px}.status{font-size:10px}.record-skills{gap:14px}.search-label{width:100%}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main" data-i18n="skip">Skip to content</a>
+<header><div class="nav">
+  <a href="#main" class="brand" aria-label="Jev Skill Router"><span class="wordmark">jev</span><span class="brand-label">Skill Router</span></a>
+  <nav class="nav-links" aria-label="Dashboard"><a href="#overview" data-i18n="overview">Overview</a><a href="#skills" data-i18n="skills">Skills</a><a href="#activity" data-i18n="activity">Activity</a></nav>
+  <div class="nav-tools"><button id="language" type="button">中文</button><button id="theme" type="button" data-i18n="dark">Dark</button></div>
+</div></header>
+<main id="main">
+  <section class="hero" aria-labelledby="title"><div><div class="eyebrow" data-i18n="eyebrow">Local intelligence / Selection observatory</div><h1 id="title" data-i18n="title">Skills, in focus.</h1><p data-i18n="intro">See what Jev selects, how often, and with what relevance.</p></div><div class="hero-art" aria-hidden="true"><div class="art-label"><b>JEV / ROUTING TELEMETRY</b><span data-i18n="art">Small decisions. Clear signals.</span></div></div></section>
+  <div id="demo" class="demo-banner" hidden data-i18n="demo">DEMO DATA — Synthetic selections for documentation. Separate from your real history.</div>
+  <div id="error" class="notice error" role="alert" hidden></div>
+  <div id="notice" class="notice" role="status" hidden></div>
+  <section id="overview" aria-label="Overview">
+    <form id="filters" class="toolbar"><div class="field"><label for="days" data-i18n="period">Time window</label><select id="days"><option value="1" data-i18n="today">Today</option><option value="7" data-i18n="week">Last 7 days</option><option value="30" selected data-i18n="month">Last 30 days</option><option value="90" data-i18n="quarter">Last 90 days</option></select></div><div class="field"><label for="project" data-i18n="project">Project</label><select id="project"><option value="" data-i18n="allProjects">All projects</option></select></div><div class="toolbar-end"><span id="connection" class="live" role="status" data-i18n="loading">Loading history</span><button id="refresh" type="button" class="primary" data-i18n="refresh">Refresh ↗</button></div></form>
+    <div class="stats"><article class="stat"><div class="stat-top"><span class="eyebrow" data-i18n="requests">Routing requests</span><span class="mono">01</span></div><div id="stat-routes" class="stat-number">—</div><p data-i18n="requestsSub">Every recorded routing attempt</p></article><article class="stat"><div class="stat-top"><span class="eyebrow" data-i18n="hitRate">Selection rate</span><span class="mono">02</span></div><div id="stat-rate" class="stat-number">—</div><p data-i18n="rateSub">Evaluated requests with a selection</p></article><article class="stat"><div class="stat-top"><span class="eyebrow" data-i18n="unique">Unique skills</span><span class="mono">03</span></div><div id="stat-unique" class="stat-number">—</div><p id="selection-total" data-i18n="uniqueSub">Selected at least once</p></article><article class="stat"><div class="stat-top"><span class="eyebrow" data-i18n="latency">Average latency</span><span class="mono">04</span></div><div id="stat-latency" class="stat-number">—</div><p data-i18n="latencySub">Catalog discovery + Jev evaluation</p></article></div>
+    <div class="charts"><section class="panel"><div class="panel-heading"><div><h2 data-i18n="trend">Selection activity</h2><p data-i18n="trendSub">Routing outcomes per day · UTC</p></div><span id="chart-scale" class="mono muted"></span></div><div id="chart" class="chart" role="img" aria-label="Routing outcomes per day"></div><div class="chart-labels mono"><span id="date-first"></span><span id="date-last"></span></div></section><section class="panel"><div class="panel-heading"><h2 data-i18n="outcomes">Outcomes</h2><span class="mono muted">/ 01</span></div><div id="breakdown" class="breakdown"></div><p class="breakdown-note" data-i18n="outcomeNote">No match is a valid result. Failures fall back to normal Codex routing.</p></section></div>
+  </section>
+  <section id="skills" class="section" aria-labelledby="skills-title"><div class="section-heading"><div><p class="eyebrow" data-i18n="rankingLabel">Where the work goes</p><h2 id="skills-title" data-i18n="ranking">Skill selections</h2></div><div class="list-controls"><label class="search-label"><span class="hidden" data-i18n="search">Search skill name or path</span><input id="search" type="search" maxlength="512" placeholder="Search skills…" aria-label="Search skill name or path"></label></div></div><div id="ranking-table" class="table-wrap"><table><thead><tr><th>#</th><th data-i18n="skill">Skill</th><th data-i18n="selections">Selections</th><th data-i18n="share">Selection rate</th><th class="probability-column" data-i18n="probability">Avg. relevance</th><th class="last-column" data-i18n="lastSelected">Last selected</th></tr></thead><tbody id="ranking"></tbody></table></div><div id="skills-empty" class="empty" hidden><b data-i18n="noSkills">No selected skills yet.</b><span data-i18n="noSkillsSub">Selections will appear after the next recorded request, or try another filter.</span></div><div class="section-foot"><span data-i18n="denominator">Rate = skill selections ÷ successfully evaluated requests. Multiple skills can be selected per request.</span><button id="show-skills" type="button" hidden></button></div></section>
+  <section id="activity" class="section" aria-labelledby="activity-title"><div class="section-heading"><div><p class="eyebrow" data-i18n="logLabel">The decision trail</p><h2 id="activity-title" data-i18n="recent">Routing history</h2></div><div class="field"><label for="status" data-i18n="status">Outcome</label><select id="status"><option value="" data-i18n="allOutcomes">All outcomes</option><option value="selected" data-i18n="selected">Selected</option><option value="none" data-i18n="none">No match</option><option value="no_candidates" data-i18n="no_candidates">No candidates</option><option value="error" data-i18n="error">Fallback</option></select></div></div><div class="log-head" aria-hidden="true"><span data-i18n="time">Time · local</span><span data-i18n="project">Project</span><span data-i18n="skills">Skills</span><span data-i18n="duration">Latency</span><span data-i18n="status">Outcome</span><span></span></div><div id="events"></div><div id="events-empty" class="empty" hidden><b data-i18n="noEvents">Nothing recorded in this view.</b><span data-i18n="noEventsSub">Submit a message with the updated plugin enabled, then refresh. Earlier requests cannot be reconstructed.</span><code>npm run dashboard</code></div><div class="section-foot"><span id="event-count"></span><div class="pagination"><button id="prev" type="button" data-i18n="prev">← Previous</button><span id="page-number" class="mono"></span><button id="next" type="button" data-i18n="next">Next →</button></div></div></section>
+  <footer class="privacy"><div><div class="footer-mark" data-i18n="localOnly">Local by design.</div><p data-i18n="privacy">Records contain selected paths, probabilities and routing metadata. Prompts and API keys are never stored. A selection is not proof of skill execution.</p></div><div><span class="footer-mark" data-i18n="storage">History directory</span><p><code id="data-dir">—</code></p><p id="updated"></p></div></footer>
+</main>
+<script>
+const messages = {
+en:{skip:'Skip to content',overview:'Overview',skills:'Skills',activity:'Activity',dark:'Dark',light:'Light',eyebrow:'Local intelligence / Selection observatory',title:'Skills, in focus.',intro:'See what Jev selects, how often, and with what relevance.',art:'Small decisions. Clear signals.',demo:'DEMO DATA — Synthetic selections for documentation. Separate from your real history.',period:'Time window',today:'Today',week:'Last 7 days',month:'Last 30 days',quarter:'Last 90 days',project:'Project',allProjects:'All projects',loading:'Loading history',refresh:'Refresh ↗',requests:'Routing requests',requestsSub:'Every recorded routing attempt',hitRate:'Selection rate',rateSub:'Evaluated requests with a selection',unique:'Unique skills',uniqueSub:'Selected at least once',latency:'Average latency',latencySub:'Catalog discovery + Jev evaluation',trend:'Selection activity',trendSub:'Routing outcomes per day · UTC',outcomes:'Outcomes',outcomeNote:'No match is a valid result. Failures fall back to normal Codex routing.',rankingLabel:'Where the work goes',ranking:'Skill selections',search:'Search skill name or path',searchPlaceholder:'Search skills…',skill:'Skill',selections:'Selections',share:'Selection rate',probability:'Avg. relevance',lastSelected:'Last selected',noSkills:'No selected skills yet.',noSkillsSub:'Selections will appear after the next recorded request, or try another filter.',denominator:'Rate = skill selections ÷ successfully evaluated requests. Multiple skills can be selected per request.',logLabel:'The decision trail',recent:'Routing history',status:'Outcome',allOutcomes:'All outcomes',selected:'Selected',none:'No match',no_candidates:'No candidates',error:'Fallback',time:'Time · local',duration:'Latency',noEvents:'Nothing recorded in this view.',noEventsSub:'Submit a message with the updated plugin enabled, then refresh. Earlier requests cannot be reconstructed.',prev:'← Previous',next:'Next →',localOnly:'Local by design.',privacy:'Records contain selected paths, probabilities and routing metadata. Prompts and API keys are never stored. A selection is not proof of skill execution.',storage:'History directory',recording:'Recording enabled',disabled:'Recording disabled',paused:'Routing disabled',failed:'Could not refresh history. Last successful data, if any, remains visible.',skipped:'Unreadable records skipped: ',recordingNote:'Recording is disabled in config.json. Existing history remains available.',routingNote:'JEV_SKILL_ROUTER_DISABLED=1. This process has routing disabled.',showAll:'Show all skills',showLess:'Show fewer',total:'total selections',max:'max / day',events:'matching records',updated:'Updated',session:'Session',model:'Model',threshold:'Threshold',candidates:'Candidates',limit:'Selection limit',request:'Record ID',workspace:'Working directory',emptySelection:'No optional skills selected.',noHistory:'No history yet',auto:'Refreshes every 15s',loadError:'Unable to read history',daysError:'History exceeds 64 MiB. Choose a shorter period or archive older daily files.'},
+zh:{skip:'跳到正文',overview:'概览',skills:'Skills',activity:'记录',dark:'深色',light:'浅色',eyebrow:'本地智能 / Skill 选择观测台',title:'每次选择，清晰可见。',intro:'了解 Jev 选择了哪些 skills、选择频率，以及对应的相关性概率。',art:'小小选择，清晰信号。',demo:'演示数据 — 为文档生成的模拟选择记录，与真实历史完全隔离。',period:'时间范围',today:'今天',week:'最近 7 天',month:'最近 30 天',quarter:'最近 90 天',project:'项目',allProjects:'全部项目',loading:'读取记录中',refresh:'刷新 ↗',requests:'路由请求',requestsSub:'所有已记录的路由尝试',hitRate:'选择命中率',rateSub:'成功评估后至少选中一个 skill 的比例',unique:'选中过的 Skills',uniqueSub:'至少被选中过一次',latency:'平均耗时',latencySub:'目录发现与 Jev 评估的总耗时',trend:'选择活动',trendSub:'每天的路由结果 · UTC',outcomes:'路由结果',outcomeNote:'未匹配也是有效结果。评估失败时，回退到 Codex 原有选择流程。',rankingLabel:'了解技能分布',ranking:'Skill 选择排行',search:'搜索 skill 名称或路径',searchPlaceholder:'搜索 skills…',skill:'Skill',selections:'选择次数',share:'选择率',probability:'平均相关性',lastSelected:'最近选中',noSkills:'还没有选中的 skill。',noSkillsSub:'下次记录的选择会显示在这里，也可以尝试其他筛选条件。',denominator:'选择率 = 该 skill 的选中次数 ÷ 成功评估的请求数。一次请求可能选中多个 skills。',logLabel:'追溯每次选择',recent:'路由历史',status:'结果',allOutcomes:'全部结果',selected:'已选择',none:'未匹配',no_candidates:'无候选项',error:'已回退',time:'时间 · 本地',duration:'耗时',noEvents:'当前范围内没有记录。',noEventsSub:'启用更新后的插件并提交一条消息，然后刷新。更新前的请求无法补录。',prev:'← 上一页',next:'下一页 →',localOnly:'数据只在本机。',privacy:'记录包含选中的路径、概率与路由元数据，不保存消息正文或 API 密钥。被选中不代表实际执行了该 skill。',storage:'历史记录目录',recording:'记录已启用',disabled:'记录已关闭',paused:'路由已停用',failed:'刷新失败。如有上次成功读取的数据，仍保留显示。',skipped:'已跳过损坏或不完整的记录：',recordingNote:'config.json 已关闭记录功能，已有历史仍可查看。',routingNote:'JEV_SKILL_ROUTER_DISABLED=1，当前进程已停用路由。',showAll:'显示全部 skills',showLess:'收起',total:'次累计选择',max:'单日最多',events:'条匹配记录',updated:'更新于',session:'任务',model:'模型',threshold:'阈值',candidates:'候选数量',limit:'选择上限',request:'记录 ID',workspace:'工作目录',emptySelection:'未选择可选 skills。',noHistory:'还没有历史记录',auto:'每 15 秒自动刷新',loadError:'无法读取历史记录',daysError:'记录超过 64 MiB，请缩短时间范围或归档旧的每日文件。'}
+};
+const $ = id => document.getElementById(id);
+const saved = key => { try { return localStorage.getItem(key); } catch { return null; } };
+const save = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+let lang = saved('jev-language') === 'zh' ? 'zh' : 'en';
+let theme = saved('jev-theme') === 'dark' ? 'dark' : 'light';
+let data, currentPage = 1, showAll = false, controller, requestId = 0, searchTimer;
+const t = key => messages[lang][key] || key;
+const number = value => new Intl.NumberFormat(lang === 'zh' ? 'zh-CN' : 'en-US').format(value);
+const percent = value => value == null ? '—' : (value * 100).toFixed(1) + '%';
+const duration = value => value == null ? '—' : (value / 1000).toFixed(2) + 's';
+const date = value => new Date(value).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-GB', { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
+function node(tag, className, text) { const element = document.createElement(tag); if (className) element.className = className; if (text !== undefined) element.textContent = text; return element; }
+function statusNode(status) { const element = node('span','status'); element.append(node('i','swatch ' + status),node('span','',t(status))); return element; }
+function setLanguage() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.documentElement.dataset.theme = theme;
+  document.querySelectorAll('[data-i18n]').forEach(element => { element.textContent = t(element.dataset.i18n); });
+  $('language').textContent = lang === 'en' ? '中文' : 'EN';
+  $('language').setAttribute('aria-label', lang === 'en' ? 'Switch to Chinese' : '切换到英文');
+  $('theme').textContent = t(theme === 'light' ? 'dark' : 'light');
+  $('search').placeholder = t('searchPlaceholder');
+  $('search').setAttribute('aria-label', t('search'));
+  $('chart').setAttribute('aria-label', t('trendSub'));
+  if (data) render();
+}
+function render() {
+  const summary = data.summary;
+  $('stat-routes').textContent = number(summary.routes);
+  $('stat-rate').textContent = percent(summary.selectionRate);
+  $('stat-unique').textContent = number(summary.uniqueSkills);
+  $('stat-latency').textContent = duration(summary.avgDurationMs);
+  $('selection-total').textContent = number(summary.selections) + ' ' + t('total');
+  $('demo').hidden = !data.demo;
+  $('connection').textContent = t(!data.routingEnabled ? 'paused' : data.recordingEnabled ? 'recording' : 'disabled');
+  $('connection').classList.toggle('off', !data.recordingEnabled || !data.routingEnabled);
+  const notices = [!data.recordingEnabled ? t('recordingNote') : '',!data.routingEnabled ? t('routingNote') : '',data.skipped ? t('skipped') + number(data.skipped) : ''].filter(Boolean);
+  $('notice').hidden = !notices.length; $('notice').textContent = notices.join(' ');
+  $('data-dir').textContent = data.dataDir;
+  $('updated').textContent = t('updated') + ' ' + date(data.generatedAt) + ' · ' + t('auto');
+  const selectedProject = $('project').value;
+  const projects = [...data.projects];
+  if (selectedProject && !projects.includes(selectedProject)) projects.push(selectedProject);
+  $('project').replaceChildren(new Option(t('allProjects'),''), ...projects.map(project => new Option(basename(project) + ' — ' + project, project)));
+  $('project').value = selectedProject;
+  const maximum = Math.max(0,...data.trend.map(day => day.selected + day.none + day.no_candidates + day.error));
+  $('chart-scale').textContent = number(maximum) + ' ' + t('max');
+  $('chart').replaceChildren(...data.trend.map(day => {
+    const bar = node('div','bar');
+    const stack = node('div','bar-stack');
+    const total = day.selected + day.none + day.no_candidates + day.error;
+    stack.style.height = (total / Math.max(1,maximum) * 100) + '%';
+    for (const status of ['error','no_candidates','none','selected']) {
+      if (!day[status]) continue;
+      const part = node('span','bar-part ' + status); part.style.height = (day[status] / total * 100) + '%'; stack.append(part);
+    }
+    bar.title = day.date + ' · ' + ['selected','none','no_candidates','error'].map(status => t(status) + ': ' + day[status]).join(' / ');
+    bar.append(stack); return bar;
+  }));
+  $('date-first').textContent = data.first; $('date-last').textContent = data.last;
+  $('breakdown').replaceChildren(...[['selected',summary.withSkills],['none',summary.noMatch],['no_candidates',summary.noCandidates],['error',summary.errors]].map(([status,count]) => {
+    const row = node('div','breakdown-row'); row.append(statusNode(status),node('strong','',number(count))); return row;
+  }));
+  const displayedSkills = showAll ? data.skills : data.skills.slice(0,6);
+  $('ranking-table').hidden = !data.skills.length; $('skills-empty').hidden = !!data.skills.length;
+  $('ranking').replaceChildren(...displayedSkills.map((skill,index) => {
+    const row = node('tr');
+    const nameCell = node('td'); const name = node('button','skill-name',skill.name); name.type='button';
+    name.onclick = () => { $('search').value = skill.name; currentPage = 1; refresh(); };
+    nameCell.append(name,node('div','skill-path',skill.path));
+    const rateCell = node('td','rate-cell'); const rate = node('div','rate'); const meter = node('meter'); meter.min=0; meter.max=1; meter.value=skill.selectionRate; meter.setAttribute('aria-label',t('share') + ' ' + skill.name);
+    rate.append(meter,node('span','num',percent(skill.selectionRate))); rateCell.append(rate);
+    row.append(node('td','mono',String(index+1).padStart(2,'0')),nameCell,node('td','num',number(skill.count)),rateCell,node('td','num probability-column',percent(skill.averageProbability)),node('td','num last-column',date(skill.lastSelected))); return row;
+  }));
+  $('show-skills').hidden = data.skills.length <= 6;
+  $('show-skills').textContent = showAll ? t('showLess') : t('showAll') + ' (' + number(data.skills.length) + ')';
+  const openIds = new Set([...document.querySelectorAll('.log-entry[open]')].map(element => element.dataset.id));
+  $('events').replaceChildren(...data.events.map(event => {
+    const details = node('details','log-entry'); details.dataset.id=event.id; details.open=openIds.has(event.id);
+    const heading = node('summary'); heading.setAttribute('aria-label',date(event.timestamp) + ' · ' + t(event.status));
+    const time = node('time','log-time',date(event.timestamp)); time.dateTime=event.timestamp;
+    const project = node('span','log-project',basename(event.cwd)); project.title=event.cwd;
+    const tags = node('span','tags'); if (event.selected.length) event.selected.forEach(skill => tags.append(node('span','tag',skill.name))); else tags.append(node('span','muted','—'));
+    const status = node('span','log-status'); status.append(statusNode(event.status));
+    heading.append(time,project,tags,node('span','num log-duration',duration(event.durationMs)),status);
+    const body = node('div','record-body'); const meta = node('dl','record-meta');
+    for (const [key,value] of [['model',event.model],['threshold',percent(event.threshold)],['candidates',event.candidateCount ?? '—'],['limit',event.maxSkills],['workspace',event.cwd],['session',event.sessionId || '—'],['request',event.id]]) {
+      const field=node('div'); field.append(node('dt','',t(key)),node('dd','',String(value))); meta.append(field);
+    }
+    const paths=node('div','record-skills');
+    for (const skill of event.selected) { const item=node('div','record-skill'); item.append(node('b','',skill.name + ' · ' + percent(skill.probability)),node('span','',skill.path)); paths.append(item); }
+    if (!event.selected.length) paths.append(node('p','muted',t('emptySelection')));
+    body.append(meta,paths); if (event.errorCode) body.append(node('p','record-error',event.errorCode)); details.append(heading,body); return details;
+  }));
+  $('events-empty').hidden = !!data.events.length;
+  $('event-count').textContent = number(data.totalEvents) + ' ' + t('events');
+  const pages = Math.max(1,Math.ceil(data.totalEvents/data.pageSize)); currentPage=data.page;
+  $('page-number').textContent = data.page + ' / ' + pages;
+  $('prev').disabled=data.page<=1; $('next').disabled=data.page>=pages;
+}
+async function refresh() {
+  const id = ++requestId;
+  if (controller) controller.abort(); controller = new AbortController();
+  $('refresh').disabled=true; $('refresh').textContent=t('loading');
+  const params=new URLSearchParams({days:$('days').value,project:$('project').value,search:$('search').value,status:$('status').value,page:String(currentPage)});
+  try {
+    const response=await fetch('/api/analytics?' + params, {signal:controller.signal});
+    const result=await response.json();
+    if (!response.ok) throw new Error(response.status===413 ? t('daysError') : t('loadError'));
+    if (id !== requestId) return;
+    data=result; $('error').hidden=true; render();
+  } catch(error) {
+    if (error.name==='AbortError' || id!==requestId) return;
+    $('error').hidden=false; $('error').textContent=t('failed') + ' ' + error.message;
+    $('connection').textContent=t('loadError'); $('connection').classList.add('off');
+  } finally { if (id===requestId) { $('refresh').disabled=false; $('refresh').textContent=t('refresh'); } }
+}
+$('language').onclick=()=>{lang=lang==='en'?'zh':'en';save('jev-language',lang);setLanguage();};
+$('theme').onclick=()=>{theme=theme==='light'?'dark':'light';save('jev-theme',theme);setLanguage();};
+$('filters').onsubmit=event=>{event.preventDefault();currentPage=1;refresh();};
+for (const id of ['days','project','status']) $(id).onchange=()=>{currentPage=1;refresh();};
+$('search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{currentPage=1;refresh();},200);};
+$('refresh').onclick=()=>refresh();
+$('show-skills').onclick=()=>{showAll=!showAll;render();};
+$('prev').onclick=()=>{currentPage--;refresh();}; $('next').onclick=()=>{currentPage++;refresh();};
+setLanguage();refresh();
+setInterval(()=>{if(!document.hidden && !$('refresh').disabled && !document.querySelector('.log-entry[open]') && !['INPUT','SELECT','BUTTON','SUMMARY'].includes(document.activeElement?.tagName)) refresh();},15000);
+</script>
+</body>
+</html>`;
+
+// src/dashboard.mjs
+var hashes = [...dashboard_page_default.matchAll(/<(?:script|style)>([\s\S]*?)<\/(?:script|style)>/gu)].map((match) => "'sha256-" + createHash("sha256").update(match[1]).digest("base64") + "'");
+function startDashboard({ dataDir, recordingEnabled = true, routingEnabled = true, port = 4318, demo = false }) {
+  const server = createServer(async (request, response) => {
+    const authority = `127.0.0.1:${server.address().port}`;
+    const host = request.headers.host;
+    const origin = request.headers.origin;
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    response.setHeader("Content-Security-Policy", `default-src 'none'; script-src ${hashes.join(" ")}; style-src ${hashes.join(" ")}; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`);
+    const send = (status2, value, type = "application/json; charset=utf-8") => {
+      response.writeHead(status2, { "Content-Type": type });
+      response.end(typeof value === "string" ? value : JSON.stringify(value));
+    };
+    if (![authority, `localhost:${server.address().port}`].includes(host) || origin && origin !== `http://${host}` || request.headers["sec-fetch-site"] === "cross-site") {
+      return send(403, { error: "Local access only." });
+    }
+    if (request.method !== "GET") {
+      response.setHeader("Allow", "GET");
+      return send(405, { error: "Read-only dashboard." });
+    }
+    const url = new URL(request.url, `http://${authority}`);
+    if (url.pathname === "/") return send(200, dashboard_page_default, "text/html; charset=utf-8");
+    if (url.pathname === "/favicon.ico") return send(204, "");
+    if (url.pathname !== "/api/analytics") return send(404, { error: "Not found." });
+    const query = url.searchParams;
+    const days = Number(query.get("days") ?? 30);
+    const pageNumber = Number(query.get("page") ?? 1);
+    const project = query.get("project") ?? "";
+    const search = query.get("search") ?? "";
+    const status = query.get("status") ?? "";
+    if (![1, 7, 30, 90].includes(days) || !Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > 1e6 || project.length > 8192 || search.length > 512 || !["", "selected", "none", "no_candidates", "error"].includes(status)) {
+      return send(400, { error: "Invalid filters." });
+    }
+    try {
+      const history = await readSelections(dataDir, days);
+      send(200, {
+        ...summarize(history, { days, project, search, status, page: pageNumber }),
+        generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        dataDir,
+        recordingEnabled,
+        routingEnabled,
+        demo
+      });
+    } catch (error) {
+      send(error.code === "JEV_HISTORY_TOO_LARGE" ? 413 : 500, {
+        error: error.code === "JEV_HISTORY_TOO_LARGE" ? "History exceeds 64 MiB. Choose a shorter period or archive older daily files." : "Cannot read local history. Check the data directory permissions."
+      });
+    }
+  });
+  server.requestTimeout = 1e4;
+  return new Promise((resolve2, reject) => {
+    const onError = (error) => reject(Object.assign(new Error("Dashboard could not start"), {
+      code: error.code === "EADDRINUSE" ? "JEV_DASHBOARD_PORT_IN_USE" : "JEV_DASHBOARD_UNAVAILABLE"
+    }));
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1", () => {
+      server.removeListener("error", onError);
+      resolve2(server);
+    });
+  });
+}
+
+// src/router.mjs
 var ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 var fail = (code) => Object.assign(new Error(code), { code });
 var isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 async function loadConfig(env = process.env) {
-  const file = env.JEV_SKILL_ROUTER_CONFIG || join(homedir(), ".config", "jev-skill-router", "config.json");
+  const file = env.JEV_SKILL_ROUTER_CONFIG || join2(homedir(), ".config", "jev-skill-router", "config.json");
   let saved = {};
   try {
-    saved = JSON.parse(await readFile(file, "utf8"));
+    saved = JSON.parse(await readFile2(file, "utf8"));
   } catch (error) {
     if (error.code !== "ENOENT" || env.JEV_SKILL_ROUTER_CONFIG) throw fail("JEV_CONFIG_INVALID");
   }
@@ -7387,9 +7776,11 @@ async function loadConfig(env = process.env) {
     threshold: saved.threshold ?? 0.8,
     maxSkills: saved.maxSkills ?? 3,
     timeoutMs: saved.timeoutMs ?? 12e3,
-    codexBin: env.JEV_CODEX_BIN ?? saved.codexBin ?? "codex"
+    codexBin: env.JEV_CODEX_BIN ?? saved.codexBin ?? "codex",
+    recordSelections: saved.recordSelections ?? true,
+    dataDir: env.JEV_SKILL_ROUTER_DATA_DIR ?? saved.dataDir ?? join2(homedir(), ".local", "share", "jev-skill-router")
   };
-  if (Object.keys(saved).some((key) => !Object.hasOwn(config, key)) || typeof config.apiKey !== "string" || /[\r\n]/u.test(config.apiKey) || typeof config.model !== "string" || !/^jev-[\w.-]+$/u.test(config.model) || !Number.isFinite(config.threshold) || config.threshold <= 0.5 || config.threshold > 1 || !Number.isInteger(config.maxSkills) || config.maxSkills < 1 || config.maxSkills > 20 || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 100 || config.timeoutMs > 2e4 || typeof config.codexBin !== "string" || !config.codexBin.trim()) throw fail("JEV_CONFIG_INVALID");
+  if (Object.keys(saved).some((key) => !Object.hasOwn(config, key)) || typeof config.apiKey !== "string" || /[\r\n]/u.test(config.apiKey) || typeof config.model !== "string" || !/^jev-[\w.-]+$/u.test(config.model) || !Number.isFinite(config.threshold) || config.threshold <= 0.5 || config.threshold > 1 || !Number.isInteger(config.maxSkills) || config.maxSkills < 1 || config.maxSkills > 20 || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 100 || config.timeoutMs > 2e4 || typeof config.codexBin !== "string" || !config.codexBin.trim() || typeof config.recordSelections !== "boolean" || typeof config.dataDir !== "string" || !isAbsolute2(config.dataDir) || config.dataDir.includes("\0")) throw fail("JEV_CONFIG_INVALID");
   return config;
 }
 function readCatalog(cwd, { codexBin, signal }) {
@@ -7446,7 +7837,7 @@ function readCatalog(cwd, { codexBin, signal }) {
       }
     });
     send({ id: 1, method: "initialize", params: {
-      clientInfo: { name: "jev-skill-router", version: "0.1.0" },
+      clientInfo: { name: "jev-skill-router", version: "0.2.0" },
       capabilities: { experimentalApi: true }
     } });
   });
@@ -7455,14 +7846,14 @@ async function eligibleSkills(catalog) {
   const seen = /* @__PURE__ */ new Set();
   const skills = [];
   for (const skill of catalog.skills) {
-    if (skill.enabled !== true || typeof skill.name !== "string" || !skill.name.trim() || typeof skill.description !== "string" || !skill.description.trim() || typeof skill.path !== "string" || !isAbsolute(skill.path)) continue;
+    if (skill.enabled !== true || typeof skill.name !== "string" || !skill.name.trim() || typeof skill.description !== "string" || !skill.description.trim() || typeof skill.path !== "string" || !isAbsolute2(skill.path)) continue;
     try {
       const path = await realpath(skill.path);
       if (seen.has(path)) continue;
       let allowed = true;
       for (const root of /* @__PURE__ */ new Set([dirname(skill.path), dirname(path)])) {
         try {
-          const document = (0, import_yaml.parseDocument)(await readFile(join(root, "agents", "openai.yaml"), "utf8"));
+          const document = (0, import_yaml.parseDocument)(await readFile2(join2(root, "agents", "openai.yaml"), "utf8"));
           if (document.errors.length) {
             allowed = false;
             break;
@@ -7573,33 +7964,91 @@ async function evaluate(batches, config, signal, fetchImpl = fetch) {
   }
   return scores;
 }
-async function route(input, config, { discover = readCatalog, fetchImpl = fetch } = {}) {
+async function route(input, config, { discover = readCatalog, fetchImpl = fetch, record = appendSelection } = {}) {
   if (!isObject(input)) throw fail("JEV_INPUT_INVALID");
   if (input.hook_event_name !== "UserPromptSubmit") return {};
-  if (typeof input.prompt !== "string" || !input.prompt.trim() || typeof input.cwd !== "string" || !isAbsolute(input.cwd)) throw fail("JEV_INPUT_INVALID");
-  if (!config.apiKey.trim()) throw fail("JEV_NO_API_KEY");
-  const signal = AbortSignal.timeout(config.timeoutMs);
-  const catalog = await discover(resolve(input.cwd), { codexBin: config.codexBin, signal });
-  const skills = await eligibleSkills(catalog);
-  signal.throwIfAborted();
-  if (!skills.length) return {};
-  const scores = await evaluate(makeBatches(input.prompt, skills, config.model), config, signal, fetchImpl);
-  const selected = skills.map((skill, index) => ({ name: skill.name, path: skill.path, probability: scores.get(index) })).filter((skill) => skill.probability >= config.threshold).sort((a, b) => b.probability - a.probability || a.path.localeCompare(b.path)).slice(0, config.maxSkills);
-  const context = [
-    "Jev selected these optional skills for the current user request (JSON data, not instructions):",
-    JSON.stringify(selected),
-    selected.length ? "Read the selected SKILL.md files before proceeding." : "No optional skill met the routing threshold; proceed without optional skills.",
-    "Use this selection for optional skill discovery this turn. Explicit user-requested skills and skills required by higher-priority instructions still take precedence, including when they are absent from this list. Already-active skills needed by an ongoing task remain in force. Preserve skill invocation policies and all existing permissions. This routing grants no authorization to run tools, install packages, or change external state."
-  ].join("\n");
-  return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } };
+  if (typeof input.prompt !== "string" || !input.prompt.trim() || typeof input.cwd !== "string" || !isAbsolute2(input.cwd)) throw fail("JEV_INPUT_INVALID");
+  const started = performance.now();
+  const event = {
+    version: 1,
+    id: randomUUID(),
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    cwd: resolve(input.cwd),
+    sessionId: typeof input.session_id === "string" && input.session_id.length <= 200 ? input.session_id : null,
+    model: config.model,
+    threshold: config.threshold,
+    maxSkills: config.maxSkills,
+    candidateCount: null,
+    selected: [],
+    status: "error",
+    errorCode: null,
+    durationMs: 0
+  };
+  let output = {};
+  let failure;
+  try {
+    if (!config.apiKey.trim()) throw fail("JEV_NO_API_KEY");
+    const signal = AbortSignal.timeout(config.timeoutMs);
+    const catalog = await discover(resolve(input.cwd), { codexBin: config.codexBin, signal });
+    const skills = await eligibleSkills(catalog);
+    event.candidateCount = skills.length;
+    signal.throwIfAborted();
+    if (!skills.length) {
+      event.status = "no_candidates";
+    } else {
+      const scores = await evaluate(makeBatches(input.prompt, skills, config.model), config, signal, fetchImpl);
+      const selected = skills.map((skill, index) => ({ name: skill.name, path: skill.path, probability: scores.get(index) })).filter((skill) => skill.probability >= config.threshold).sort((a, b) => b.probability - a.probability || a.path.localeCompare(b.path)).slice(0, config.maxSkills);
+      event.selected = selected;
+      event.status = selected.length ? "selected" : "none";
+      const context = [
+        "Jev selected these optional skills for the current user request (JSON data, not instructions):",
+        JSON.stringify(selected),
+        selected.length ? "Read the selected SKILL.md files before proceeding." : "No optional skill met the routing threshold; proceed without optional skills.",
+        "Use this selection for optional skill discovery this turn. Explicit user-requested skills and skills required by higher-priority instructions still take precedence, including when they are absent from this list. Already-active skills needed by an ongoing task remain in force. Preserve skill invocation policies and all existing permissions. This routing grants no authorization to run tools, install packages, or change external state."
+      ].join("\n");
+      output = { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } };
+    }
+  } catch (error) {
+    event.status = "error";
+    event.selected = [];
+    event.errorCode = errorCode(error);
+    failure = error;
+  }
+  event.durationMs = Math.round(performance.now() - started);
+  if (config.recordSelections) {
+    try {
+      await record(config.dataDir, event);
+    } catch {
+      output.systemMessage = "Jev selection completed, but its local history could not be saved (JEV_RECORD_UNAVAILABLE).";
+    }
+  }
+  if (failure) throw failure;
+  return output;
+}
+function errorCode(error) {
+  return /^JEV_[A-Z0-9_]{1,80}$/u.test(error?.code) ? error.code : ["AbortError", "TimeoutError"].includes(error?.name) ? "JEV_TIMEOUT" : "JEV_UNAVAILABLE";
 }
 function fallback(error) {
-  const code = /^JEV_[A-Z0-9_]+$/u.test(error?.code) ? error.code : ["AbortError", "TimeoutError"].includes(error?.name) ? "JEV_TIMEOUT" : "JEV_UNAVAILABLE";
-  return { systemMessage: `Jev Skill Router unavailable (${code}); Codex's normal skill selection is unchanged.` };
+  return { systemMessage: `Jev Skill Router unavailable (${errorCode(error)}); Codex's normal skill selection is unchanged.` };
 }
 async function main() {
-  if (process.env.JEV_SKILL_ROUTER_DISABLED === "1") return {};
+  if (process.env.JEV_SKILL_ROUTER_DISABLED === "1" && process.argv.length === 2) return {};
   const config = await loadConfig();
+  if (process.argv[2] === "--dashboard") {
+    const args = process.argv.slice(3);
+    if (args.length && (args.length !== 2 || args[0] !== "--port" || !/^\d+$/u.test(args[1]))) throw fail("JEV_ARGUMENT_INVALID");
+    const port = args.length ? Number(args[1]) : 4318;
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw fail("JEV_ARGUMENT_INVALID");
+    const server = await startDashboard({
+      dataDir: config.dataDir,
+      recordingEnabled: config.recordSelections,
+      routingEnabled: process.env.JEV_SKILL_ROUTER_DISABLED !== "1",
+      port
+    });
+    process.stdout.write(`Jev Skill Router dashboard: http://127.0.0.1:${server.address().port}
+`);
+    return;
+  }
   if (process.argv[2] === "--list") {
     const catalog = await readCatalog(resolve(process.cwd()), {
       codexBin: config.codexBin,
@@ -7619,10 +8068,12 @@ async function main() {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((error) => {
-    if (process.argv[2] === "--list") process.exitCode = 1;
+    if (process.argv.length > 2) process.exitCode = 1;
     return fallback(error);
-  }).then((output) => process.stdout.write(`${JSON.stringify(output)}
-`));
+  }).then((output) => {
+    if (output !== void 0) process.stdout.write(`${JSON.stringify(output)}
+`);
+  });
 }
 export {
   eligibleSkills,

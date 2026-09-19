@@ -8,7 +8,7 @@
 - **本地选择记录**：记录已选择、未匹配、无候选项和路由失败，以及对应项目、任务、模型、阈值与耗时。
 - **Web 统计页面**：查看选择率、每日趋势、skill 排行、平均相关性和可展开的记录详情，支持时间、项目、skill 与结果筛选。
 - **中英文界面**：支持语言切换、明暗主题和手机浏览。
-- **Web 服务自动启动**：启动或恢复 Codex 任务后即可打开本地页面；服务停止后，提交消息会自动恢复，无需手动执行命令。
+- **打开应用即启动 Web**：macOS 注册一次随附的启动服务后，打开 Codex 就会启动 Web，无需进入任务或发送消息；端口读取 Jev 配置文件。
 
 ### 页面预览
 
@@ -29,7 +29,7 @@
 - Codex 进程能够找到 **Node.js 22+**。
 - 具有 Jev 访问权限的 TypeSafe API Key。
 
-仓库已包含打包后的 hook。安装使用时**不需要** `npm install`、Python、MCP 服务或另外安装后台服务。
+仓库已包含打包后的 hook，使用时**不需要** `npm install`、Python 或 MCP 服务。随应用启动使用插件随附的 macOS 用户级 LaunchAgent；其他平台仍支持随任务／消息启动。
 
 ## 安装
 
@@ -38,7 +38,7 @@ codex plugin marketplace add https://github.com/droid-Q/jev-skill-router.git
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-按下文配置密钥。在 Codex CLI 中打开 `/hooks`，审查并信任该插件的 `SessionStart` 和 `UserPromptSubmit` 命令。安装插件不会自动信任其 hooks。启动或恢复 Codex 任务后，打开 [http://127.0.0.1:4318](http://127.0.0.1:4318)。桌面端与 CLI 需要使用同一份本机 Codex 配置。
+按下文配置密钥。在 Codex CLI 中打开 `/hooks`，审查并信任该插件的 `SessionStart` 和 `UserPromptSubmit` 命令。安装插件不会自动信任其 hooks。桌面端与 CLI 需要使用同一份本机 Codex 配置。如需打开应用就启动 Web，再按下文注册一次 macOS 启动服务。
 
 ## 配置
 
@@ -75,19 +75,43 @@ chmod 600 ~/.config/jev-skill-router/config.json
 | `timeoutMs` | `12000` | skill 发现和 API 调用共用的总超时，范围 `100`～`20000` 毫秒。 |
 | `codexBin` | `codex` | 可执行程序名或绝对路径，不包含 shell 参数；`JEV_CODEX_BIN` 优先。 |
 | `recordSelections` | `true` | 是否在本机保存路由历史；设为 `false` 停止新增记录，已有记录保留。 |
-| `dashboardAutoStart` | `true` | 在任务／消息 hook 中自动启动 Web 服务；设为 `false` 后仍可手动启动。 |
-| `dashboardPort` | `4318` | Web 服务端口，范围 `1`～`65535`，也是手动启动的默认端口。 |
+| `dashboardAutoStart` | `true` | 由 macOS 启动服务和任务／消息 hook 自动启动 Web；设为 `false` 后仍可手动启动。 |
+| `dashboardPort` | `4318` | 在此 Jev JSON 文件中配置 Web 端口，范围 `1`～`65535`，也是手动启动的默认端口。 |
 | `dataDir` | `~/.local/share/jev-skill-router` | 历史目录；自定义值必须是**绝对路径**，JSON 中不会展开 `~`；`JEV_SKILL_ROUTER_DATA_DIR` 优先。 |
 
 通过 `JEV_SKILL_ROUTER_CONFIG` 指定其他配置文件，或设置 `JEV_SKILL_ROUTER_DISABLED=1` 停用选择功能和 hook 自动启动 Web 服务的行为。插件不会自行写入配置或保存用户消息。
 
 ## Web 页面与历史记录
 
-安装并信任 hooks 后，启动或恢复 Codex 任务，即可打开 [http://127.0.0.1:4318](http://127.0.0.1:4318)。`SessionStart` 在后台启动页面服务，`UserPromptSubmit` 也会检查服务，停止后自动恢复。Codex 没有插件安装完成事件，因此实际启动时机是首次执行已信任的任务／消息 hook，而非安装命令执行期间。插件不会自动弹出浏览器标签页。
+### 打开 Codex 时启动（macOS）
+
+注册一次启动服务，插件根目录使用 `codex plugin add` 输出或 `/hooks` 显示的实际路径：
+
+```sh
+node "<已安装插件根目录>/scripts/router.mjs" --install-app-startup
+```
+
+在仓库目录下也可执行 `npm run autostart:install`，无需管理员权限或安装额外依赖。
+
+之后打开 Codex 桌面应用，约五秒内就会启动 Web，即使停留在首页、尚未进入任务也可以使用。启动服务通过原生应用标识 `com.openai.codex` 检测，兼容当前以 ChatGPT 命名、内含 Codex 的桌面版本。它只在当前 macOS 用户登录期间运行，不发送消息，也不调用 Jev。插件不会自动弹出浏览器标签页。
+
+默认页面为 [http://127.0.0.1:4318](http://127.0.0.1:4318)。**端口配置在 `~/.config/jev-skill-router/config.json` 的 `dashboardPort` 中**，LaunchAgent 不保存端口。修改后下次检查即读取新配置；原端口上的已运行服务会等待空闲超时退出。将 `dashboardAutoStart` 设为 `false` 可停止后续自动启动。
+
+服务注册文件为 `~/Library/LaunchAgents/io.github.droid-q.jev-skill-router.plist`，独立脚本复制到 `~/Library/Application Support/Jev Skill Router/router.mjs`，避免插件旧版本缓存被清理后失效。注册时设置的 `JEV_SKILL_ROUTER_CONFIG`、`JEV_SKILL_ROUTER_DATA_DIR`、`JEV_SKILL_ROUTER_DISABLED` 会传给启动服务；API Key 不会写入服务注册文件。
+
+**卸载插件前**先移除随应用启动的服务；也可在仓库执行 `npm run autostart:remove`：
+
+```sh
+node "<已安装插件根目录>/scripts/router.mjs" --remove-app-startup
+```
+
+该命令仅删除启动服务注册文件及复制的脚本，保留 Jev 配置与选择历史。如果已经卸载插件，可以对 `"$HOME/Library/Application Support/Jev Skill Router/router.mjs"` 使用同样的参数。
+
+`SessionStart` 和 `UserPromptSubmit` 继续作为补充机制，无需 macOS 启动服务也可使用，分别在启动／恢复任务、提交消息时启动 Web。Codex 没有应用启动级插件 hook，因此进入任务之前的自动启动需要上述 macOS 服务。
 
 多个任务共用一个服务。hook 仅复用历史目录相同的 Jev 页面，不会为抢占端口停止其他进程。若端口已占用，将 `dashboardPort` 改为可用端口即可。启动失败只显示简短状态，不影响 skill 选择。页面服务本身不需要 Jev 密钥。
 
-自动启动的进程在连续 30 分钟没有页面请求或 hook 检查后退出。关闭浏览器、停用自动启动或卸载插件后，已运行的进程会等待空闲超时；可见页面的定时刷新会使服务保持运行。配置在服务启动时读取，历史记录保留在磁盘上。
+自动启动的进程在连续 30 分钟没有页面请求、启动服务检查或 hook 检查后退出。Codex 打开期间，启动服务会保持页面可用，并在进程停止后恢复。退出 Codex 并关闭页面后，服务会在空闲超时后退出；停用或移除自动启动时，已运行服务也会等待空闲超时。可见页面的定时刷新会使服务保持运行，历史记录保留在磁盘上。
 
 如需手动启动，将 `dashboardAutoStart` 设为 `false`，在仓库目录下使用 Node.js 22+ 执行：
 
@@ -130,7 +154,7 @@ codex plugin marketplace upgrade jev-skill-router
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-若 `/hooks` 提示，审查并信任更新后的 hooks，然后启动或恢复 Codex 任务。从手动启动页面的旧版本升级时，先在原终端按 `Ctrl+C` 停止旧进程，以便自动启动使用该端口。历史记录位于插件缓存之外，升级时会保留。
+若 `/hooks` 提示，审查并信任更新后的 hooks。如已启用 macOS 随应用启动，使用**升级后的已安装脚本**再执行一次 `--install-app-startup`，以更新复制的脚本；Node.js 路径变更后也需重新注册。从手动启动页面的旧版本升级时，先在原终端按 `Ctrl+C` 停止旧进程，以便自动启动使用该端口。历史记录位于插件缓存之外，升级时会保留。
 
 ## 工作方式
 
@@ -172,7 +196,7 @@ node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit"
 
 这会将示例消息和本机符合条件的 skill 元数据发送给 TypeSafe。成功时返回 `hookSpecificOutput.additionalContext`，降级时返回 `systemMessage`。hook 降级时仍以成功状态退出，让原任务继续进行。
 
-自检使用合成 Jev 响应和临时文件，覆盖 app-server 协议、策略过滤、链接去重、打包后 CLI、请求结构、多 skill 选择、分批、无效响应、超时、安全降级、私密与并发记录、历史筛选、统计分母、分页及本地 HTTP 访问限制；同时验证脱离终端启动、并发 hooks、服务复用、停止后恢复、关闭自动启动、空闲退出和端口冲突处理。HTTP 检查需要允许监听临时本地端口。它**不代表** Jev 选择准确率评测或真实 API 访问验证。
+自检使用合成 Jev 响应和临时文件，覆盖 app-server 协议、策略过滤、链接去重、打包后 CLI、请求结构、多 skill 选择、分批、无效响应、超时、安全降级、私密与并发记录、历史筛选、统计分母、分页及本地 HTTP 访问限制；同时验证脱离终端启动、并发 hooks、服务复用、停止后恢复、关闭自动启动、空闲退出、端口冲突处理、应用打开／关闭行为、读取 Jev 配置中的端口变更及不含 API Key 的 LaunchAgent XML。HTTP 检查需要允许监听临时本地端口。它**不代表** Jev 选择准确率评测或真实 API 访问验证。
 
 ## 参考资料
 

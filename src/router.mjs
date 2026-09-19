@@ -8,6 +8,7 @@ import { parseDocument } from 'yaml';
 import { randomUUID } from 'node:crypto';
 import { appendSelection } from './records.mjs';
 import { ensureDashboard, startDashboard } from './dashboard.mjs';
+import { installAppStartup, removeAppStartup, startDashboardForApp } from './app-startup.mjs';
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const fail = code => Object.assign(new Error(code), { code });
@@ -95,7 +96,7 @@ export function readCatalog(cwd, { codexBin, signal }) {
       }
     });
     send({ id: 1, method: 'initialize', params: {
-      clientInfo: { name: 'jev-skill-router', version: '0.3.0' },
+      clientInfo: { name: 'jev-skill-router', version: '0.4.0' },
       capabilities: { experimentalApi: true },
     } });
   });
@@ -280,7 +281,23 @@ export function fallback(error) {
 
 async function main() {
   if (process.env.JEV_SKILL_ROUTER_DISABLED === '1' && process.argv.length === 2) return {};
+  if (process.argv[2] === '--remove-app-startup') {
+    if (process.argv.length !== 3) throw fail('JEV_ARGUMENT_INVALID');
+    await removeAppStartup();
+    process.stdout.write('Removed Jev dashboard app startup. Selection history is preserved.\n');
+    return;
+  }
   const config = await loadConfig();
+  if (['--install-app-startup', '--app-startup-check'].includes(process.argv[2])) {
+    if (process.argv.length !== 3) throw fail('JEV_ARGUMENT_INVALID');
+    if (process.argv[2] === '--install-app-startup') {
+      const plist = await installAppStartup(process.argv[1]);
+      process.stdout.write(`Jev dashboard will start when Codex opens (macOS): ${plist}\n`);
+    } else if (process.env.JEV_SKILL_ROUTER_DISABLED !== '1') {
+      await startDashboardForApp(config, process.argv[1]);
+    }
+    return;
+  }
   if (['--dashboard', '--dashboard-auto'].includes(process.argv[2])) {
     const automatic = process.argv[2] === '--dashboard-auto';
     const args = process.argv.slice(3);

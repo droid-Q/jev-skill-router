@@ -1,6 +1,6 @@
 {
   "name": "jev-skill-router",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Route Codex skills with TypeSafe Jev and inspect local selection history in a web dashboard.",
   "author": {
     "name": "droid-Q"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Jev Skill Router",
     "shortDescription": "Jev skill routing with local selection analytics.",
-    "longDescription": "Selects relevant skills with TypeSafe Jev, records decisions locally, and automatically starts a bilingual web dashboard when a Codex task starts or a message is submitted. Inspect selection rates, trends, and routing history. Explicit skill requests and existing permissions remain authoritative.",
+    "longDescription": "Selects relevant skills with TypeSafe Jev, records decisions locally, and starts a bilingual web dashboard when Codex opens using the included macOS startup helper, with task and message hooks as a fallback. Inspect selection rates, trends, and routing history. Explicit skill requests and existing permissions remain authoritative.",
     "developerName": "droid-Q",
     "category": "Productivity",
     "capabilities": [],

@@ -8,7 +8,7 @@
 - **Local selection history** — record selections, no matches, empty catalogs, and routing failures, together with project, session, model, threshold, and latency.
 - **Web analytics** — inspect selection rates, daily trends, skill rankings, average relevance, and expandable records. Filter by time, project, skill, or outcome.
 - **English / Chinese UI** — switch language and light/dark appearance; the dashboard also works on mobile.
-- **Automatic dashboard startup** — start or resume a Codex task and open the local dashboard. Later messages restart it if needed; no terminal command is required.
+- **Dashboard on app launch** — on macOS, register the included startup helper once. Opening Codex starts the dashboard without opening a task or sending a message; its port comes from the Jev configuration file.
 
 ### Dashboard preview
 
@@ -29,7 +29,7 @@ The screenshots below use **synthetic demo data**, not measured Jev accuracy or 
 - **Node.js 22+** available to the process running Codex.
 - A TypeSafe API key with access to Jev.
 
-The shipped hook is bundled. Plugin users do **not** need `npm install`, Python, an MCP server, or a separately installed service.
+The shipped hook is bundled. Plugin users do **not** need `npm install`, Python, or an MCP server. App-launch startup uses the included macOS user LaunchAgent; session/prompt startup remains available on other platforms.
 
 ## Install
 
@@ -38,7 +38,7 @@ codex plugin marketplace add https://github.com/droid-Q/jev-skill-router.git
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-Configure the key as described below. Open `/hooks` in the Codex CLI and review/trust this plugin's `SessionStart` and `UserPromptSubmit` commands. Installing a plugin does not automatically trust its hooks. Start or resume a Codex task, then open [http://127.0.0.1:4318](http://127.0.0.1:4318). The desktop app and CLI must use the same local Codex configuration.
+Configure the key as described below. Open `/hooks` in the Codex CLI and review/trust this plugin's `SessionStart` and `UserPromptSubmit` commands. Installing a plugin does not automatically trust its hooks. The desktop app and CLI must use the same local Codex configuration. For startup as soon as the app opens, also register the macOS helper below once.
 
 ## Configure
 
@@ -75,19 +75,43 @@ For the desktop app, prefer the configuration file: apps launched from Finder ma
 | `timeoutMs` | `12000` | Shared discovery/API deadline, from `100` to `20000` milliseconds. |
 | `codexBin` | `codex` | Executable name or absolute path; no shell arguments. Overridden by `JEV_CODEX_BIN`. |
 | `recordSelections` | `true` | Save routing history locally. `false` stops new records without deleting existing history. |
-| `dashboardAutoStart` | `true` | Start the local dashboard from session/prompt hooks. `false` keeps manual startup available. |
-| `dashboardPort` | `4318` | Dashboard port, from `1` to `65535`; also the default for manual startup. |
+| `dashboardAutoStart` | `true` | Start the local dashboard from the macOS helper and session/prompt hooks. `false` keeps manual startup available. |
+| `dashboardPort` | `4318` | Dashboard port, from `1` to `65535`, configured in this Jev JSON file; also the default for manual startup. |
 | `dataDir` | `~/.local/share/jev-skill-router` | History directory. A custom value must be an **absolute path** (`~` is not expanded in JSON). Overridden by `JEV_SKILL_ROUTER_DATA_DIR`. |
 
 Set `JEV_SKILL_ROUTER_CONFIG` to use another configuration file, or `JEV_SKILL_ROUTER_DISABLED=1` to disable routing and hook-triggered dashboard startup. The plugin does not write settings or store prompts.
 
 ## Web dashboard and history
 
-After installing and trusting the hooks, start or resume a Codex task and open [http://127.0.0.1:4318](http://127.0.0.1:4318). `SessionStart` starts the dashboard in the background; `UserPromptSubmit` also checks it and restarts it if needed. Codex has no plugin-install event, so startup happens on the first trusted session/prompt hook, rather than inside the installation command. Browser tabs are not opened automatically.
+### Start when Codex opens (macOS)
+
+Register the startup helper once, using the installed plugin root printed by `codex plugin add` or shown in `/hooks`:
+
+```sh
+node "<installed-plugin-root>/scripts/router.mjs" --install-app-startup
+```
+
+From a repository checkout, the equivalent command is `npm run autostart:install`. No administrator access or additional dependencies are needed.
+
+Opening the Codex desktop app now starts the dashboard within about five seconds, even if you stay on the home screen. The helper checks the native `com.openai.codex` application identifier, including the desktop build named ChatGPT that hosts Codex. It runs only in your macOS login session and does not send prompts or call Jev. Browser tabs are not opened automatically.
+
+The URL defaults to [http://127.0.0.1:4318](http://127.0.0.1:4318). Set **`dashboardPort` in `~/.config/jev-skill-router/config.json`** to change it; the LaunchAgent contains no port. The next check reads the updated file. An existing server on the previous port remains until its idle timeout. Setting `dashboardAutoStart` to `false` stops new automatic starts.
+
+The helper is registered at `~/Library/LaunchAgents/io.github.droid-q.jev-skill-router.plist`. A standalone script is copied to `~/Library/Application Support/Jev Skill Router/router.mjs`, so removing an old versioned plugin cache does not break startup. `JEV_SKILL_ROUTER_CONFIG`, `JEV_SKILL_ROUTER_DATA_DIR`, and `JEV_SKILL_ROUTER_DISABLED`, when set during registration, are preserved for the helper; API keys are not copied into its registration.
+
+To remove app-launch startup, run this **before uninstalling the plugin** (or use `npm run autostart:remove` from the checkout):
+
+```sh
+node "<installed-plugin-root>/scripts/router.mjs" --remove-app-startup
+```
+
+This removes only the helper registration and its copied script. Your configuration and selection history remain. If the plugin has already been removed, run the same flag with `"$HOME/Library/Application Support/Jev Skill Router/router.mjs"` instead.
+
+`SessionStart` and `UserPromptSubmit` remain a fallback and work without the macOS helper. They start the service when a task starts/resumes or a message is submitted. Codex has no application-launch plugin hook, so the macOS helper is required for startup before entering a task.
 
 Concurrent tasks share the same service. The hook only reuses a Jev dashboard serving the same history directory; it never stops another process to claim a port. If the port is occupied, set `dashboardPort` to an unused port. Startup failures produce a short status message and leave skill routing running. The dashboard itself requires no Jev key.
 
-The automatic process exits after 30 minutes without a local dashboard request or hook check. Closing the browser, disabling automatic startup, or uninstalling the plugin leaves an already-running process to reach that idle timeout; a visible dashboard tab keeps it alive through its refresh requests. Configuration is read when the server starts. History remains on disk.
+The automatic process exits after 30 minutes without a local dashboard request, helper check, or hook check. While Codex is open, the helper keeps it available and restarts it if needed. After quitting Codex and closing the dashboard tab, it reaches that idle timeout. Disabling or removing startup also leaves an already-running server to reach its timeout. A visible dashboard tab keeps it alive through refresh requests. History remains on disk.
 
 For manual startup, set `dashboardAutoStart` to `false` and run from the repository checkout with Node.js 22+:
 
@@ -130,7 +154,7 @@ codex plugin marketplace upgrade jev-skill-router
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-Review/trust the updated hooks in `/hooks` if requested, then start or resume a Codex task. When upgrading from a version with a manually started dashboard, stop that old terminal process with `Ctrl+C` first so automatic startup can use its port. Selection history survives updates because it lives outside the plugin cache.
+Review/trust the updated hooks in `/hooks` if requested. If you use macOS app-launch startup, rerun `--install-app-startup` with the **updated installed bundle** to refresh its copied script; rerun it after moving Node.js as well. When upgrading from a version with a manually started dashboard, stop that old terminal process with `Ctrl+C` first so automatic startup can use its port. Selection history survives updates because it lives outside the plugin cache.
 
 ## Behavior
 
@@ -172,7 +196,7 @@ node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit"
 
 This sends the sample prompt and your eligible skill metadata to TypeSafe. Success returns `hookSpecificOutput.additionalContext`; a fallback returns `systemMessage`. Hooks exit successfully on fallback so the original task can proceed.
 
-The self-check covers the app-server protocol, policy filtering, symlink deduplication, bundled CLI, request shape, multi-skill selection, batching, invalid responses, timeouts, safe fallback, private/concurrent logging, history filtering, metric denominators, pagination, and loopback HTTP access controls. It also checks detached startup, concurrent hooks, service reuse, restart after exit, opt-out, idle shutdown, and safe port conflicts. It uses synthetic Jev responses and temporary files; the HTTP checks need permission to bind temporary localhost ports. It does **not** measure Jev's selection accuracy or prove real API access.
+The self-check covers the app-server protocol, policy filtering, symlink deduplication, bundled CLI, request shape, multi-skill selection, batching, invalid responses, timeouts, safe fallback, private/concurrent logging, history filtering, metric denominators, pagination, and loopback HTTP access controls. It also checks detached startup, concurrent hooks, service reuse, restart after exit, opt-out, idle shutdown, safe port conflicts, app-open/app-closed behavior, reading port changes from Jev config, and LaunchAgent XML without API keys. It uses synthetic Jev responses and temporary files; the HTTP checks need permission to bind temporary localhost ports. It does **not** measure Jev's selection accuracy or prove real API access.
 
 ## References
 

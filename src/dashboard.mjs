@@ -1,12 +1,16 @@
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { readSelections, summarize } from './records.mjs';
 import page from './dashboard-page.mjs';
 
 const hashes = [...page.matchAll(/<(?:script|style)>([\s\S]*?)<\/(?:script|style)>/gu)]
   .map(match => "'sha256-" + createHash('sha256').update(match[1]).digest('base64') + "'");
 
-export function startDashboard({ dataDir, recordingEnabled = true, routingEnabled = true, port = 4318, demo = false }) {
+export function startDashboard({ dataDir, recordingEnabled = true, routingEnabled = true, port = 4318, demo = false, idleTimeoutMs = 0 }) {
+  let idleTimer;
   const server = createServer(async (request, response) => {
     const authority = `127.0.0.1:${server.address().port}`;
     const host = request.headers.host;
@@ -27,7 +31,11 @@ export function startDashboard({ dataDir, recordingEnabled = true, routingEnable
       response.setHeader('Allow', 'GET');
       return send(405, { error: 'Read-only dashboard.' });
     }
+    idleTimer?.refresh();
     const url = new URL(request.url, `http://${authority}`);
+    if (url.pathname === '/api/health') return send(200, {
+      service: 'jev-skill-router', dataDir: resolve(dataDir), recordingEnabled, routingEnabled, demo, pid: process.pid,
+    });
     if (url.pathname === '/') return send(200, page, 'text/html; charset=utf-8');
     if (url.pathname === '/favicon.ico') return send(204, '');
     if (url.pathname !== '/api/analytics') return send(404, { error: 'Not found.' });
@@ -57,6 +65,55 @@ export function startDashboard({ dataDir, recordingEnabled = true, routingEnable
       code: error.code === 'EADDRINUSE' ? 'JEV_DASHBOARD_PORT_IN_USE' : 'JEV_DASHBOARD_UNAVAILABLE',
     }));
     server.once('error', onError);
-    server.listen(port, '127.0.0.1', () => { server.removeListener('error', onError); resolve(server); });
+    server.listen(port, '127.0.0.1', () => {
+      server.removeListener('error', onError);
+      if (idleTimeoutMs) {
+        idleTimer = setTimeout(() => { server.closeAllConnections(); server.close(); }, idleTimeoutMs);
+        idleTimer.unref();
+        server.once('close', () => clearTimeout(idleTimer));
+      }
+      resolve(server);
+    });
   });
+}
+
+// The loopback socket is the singleton: simultaneous hooks may spawn children,
+// but only one can bind; the others exit without touching the running service.
+export async function ensureDashboard(config, entry) {
+  if (!config.dashboardAutoStart) return;
+  const conflict = () => Object.assign(new Error('Dashboard port is occupied'), { code: 'JEV_DASHBOARD_PORT_IN_USE' });
+  const ready = async () => {
+    try {
+      const response = await fetch(`http://127.0.0.1:${config.dashboardPort}/api/health`, {
+        redirect: 'error', signal: AbortSignal.timeout(300),
+      });
+      if (!response.ok) { await response.body?.cancel(); throw conflict(); }
+      const chunks = [];
+      let bytes = 0;
+      for await (const chunk of response.body) {
+        bytes += chunk.length;
+        if (bytes > 16384) throw conflict();
+        chunks.push(chunk);
+      }
+      const health = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (health.service !== 'jev-skill-router' || health.demo !== false || health.dataDir !== resolve(config.dataDir)) throw conflict();
+      return true;
+    } catch (error) {
+      if (error.cause?.code === 'ECONNREFUSED') return false;
+      throw conflict();
+    }
+  };
+  if (await ready()) return;
+  const child = spawn(process.execPath, [resolve(entry), '--dashboard-auto'], {
+    detached: true, stdio: 'ignore', windowsHide: true,
+  });
+  let failed = false;
+  child.on('error', () => { failed = true; });
+  child.unref();
+  const deadline = Date.now() + 2000;
+  while (!failed && Date.now() < deadline) {
+    await delay(75);
+    if (await ready()) return;
+  }
+  throw Object.assign(new Error('Dashboard did not start'), { code: 'JEV_DASHBOARD_UNAVAILABLE' });
 }

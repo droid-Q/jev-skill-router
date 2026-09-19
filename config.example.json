@@ -5,5 +5,7 @@
   "maxSkills": 3,
   "timeoutMs": 12000,
   "codexBin": "codex",
-  "recordSelections": true
+  "recordSelections": true,
+  "dashboardAutoStart": true,
+  "dashboardPort": 4318
 }

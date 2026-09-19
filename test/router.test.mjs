@@ -15,13 +15,15 @@ try {
   const config = await loadConfig({ JEV_SKILL_ROUTER_CONFIG: configFile });
   assert.equal((await loadConfig({ JEV_SKILL_ROUTER_CONFIG: configFile, TYPESAFE_API_KEY: 'override' })).apiKey, 'override');
   assert.equal(config.recordSelections, true);
-  for (const settings of [{ threshold: 0.5 }, { maxSkills: 0 }, { timeoutMs: 30000 }, { unexpected: true }, { apiKey: 'bad\nkey' }, { recordSelections: 'true' }, { dataDir: 'relative' }]) {
+  assert.equal(config.dashboardAutoStart, true);
+  assert.equal(config.dashboardPort, 4318);
+  for (const settings of [{ threshold: 0.5 }, { maxSkills: 0 }, { timeoutMs: 30000 }, { unexpected: true }, { apiKey: 'bad\nkey' }, { recordSelections: 'true' }, { dataDir: 'relative' }, { dashboardAutoStart: 'true' }, { dashboardPort: 0 }, { dashboardPort: 65536 }, { dashboardPort: 4318.5 }]) {
     await writeFile(configFile, JSON.stringify(settings));
     await assert.rejects(loadConfig({ JEV_SKILL_ROUTER_CONFIG: configFile }), /JEV_CONFIG_INVALID/);
   }
   await writeFile(configFile, '{broken');
   await assert.rejects(loadConfig({ JEV_SKILL_ROUTER_CONFIG: configFile }), /JEV_CONFIG_INVALID/);
-  await writeFile(configFile, '{}');
+  await writeFile(configFile, '{"dashboardAutoStart":false}');
 
   const raw = [];
   for (const [name, metadata, enabled] of [
@@ -166,6 +168,8 @@ createInterface({input:process.stdin}).on('line', line => {
   });
   const hooks = JSON.parse(await readFile('plugins/jev-skill-router/hooks/hooks.json', 'utf8'));
   assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].command, 'node "${PLUGIN_ROOT}/scripts/router.mjs"');
+  assert.equal(hooks.hooks.SessionStart[0].matcher, 'startup|resume');
+  assert.equal(hooks.hooks.SessionStart[0].hooks[0].command, hooks.hooks.UserPromptSubmit[0].hooks[0].command);
   assert.equal(JSON.parse(await readFile('.agents/plugins/marketplace.json', 'utf8')).plugins[0].source.path, './plugins/jev-skill-router');
   const history = await readFile(join(config.dataDir, new Date().toISOString().slice(0, 10) + '.jsonl'), 'utf8');
   assert(!history.includes(input.prompt) && !history.includes('fixture-key') && !history.includes('Private skill body'));

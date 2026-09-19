@@ -8,7 +8,7 @@
 - **本地选择记录**：记录已选择、未匹配、无候选项和路由失败，以及对应项目、任务、模型、阈值与耗时。
 - **Web 统计页面**：查看选择率、每日趋势、skill 排行、平均相关性和可展开的记录详情，支持时间、项目、skill 与结果筛选。
 - **中英文界面**：支持语言切换、明暗主题和手机浏览。
-- **记录无需额外服务**：hook 自行写入历史，只在需要查看时启动 Web 页面。
+- **Web 服务自动启动**：启动或恢复 Codex 任务后即可打开本地页面；服务停止后，提交消息会自动恢复，无需手动执行命令。
 
 ### 页面预览
 
@@ -25,11 +25,11 @@
 
 ## 运行要求
 
-- 支持插件 hooks、`UserPromptSubmit` 和 app-server `skills/list` 的 Codex CLI；开发基于 **0.154.0**。
+- 支持插件 hooks、`SessionStart`、`UserPromptSubmit` 和 app-server `skills/list` 的 Codex CLI；开发基于 **0.154.0**。
 - Codex 进程能够找到 **Node.js 22+**。
 - 具有 Jev 访问权限的 TypeSafe API Key。
 
-仓库已包含打包后的 hook。安装使用时**不需要** `npm install`、Python、MCP 服务或独立后台服务。
+仓库已包含打包后的 hook。安装使用时**不需要** `npm install`、Python、MCP 服务或另外安装后台服务。
 
 ## 安装
 
@@ -38,7 +38,7 @@ codex plugin marketplace add https://github.com/droid-Q/jev-skill-router.git
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-按下文配置密钥。在 Codex CLI 中打开 `/hooks`，审查并信任该插件的 `UserPromptSubmit` 命令。安装插件不会自动信任其 hooks。安装后新建 Codex 任务；桌面端与 CLI 需要使用同一份本机 Codex 配置。
+按下文配置密钥。在 Codex CLI 中打开 `/hooks`，审查并信任该插件的 `SessionStart` 和 `UserPromptSubmit` 命令。安装插件不会自动信任其 hooks。启动或恢复 Codex 任务后，打开 [http://127.0.0.1:4318](http://127.0.0.1:4318)。桌面端与 CLI 需要使用同一份本机 Codex 配置。
 
 ## 配置
 
@@ -52,7 +52,9 @@ codex plugin add jev-skill-router@jev-skill-router
   "maxSkills": 3,
   "timeoutMs": 12000,
   "codexBin": "codex",
-  "recordSelections": true
+  "recordSelections": true,
+  "dashboardAutoStart": true,
+  "dashboardPort": 4318
 }
 ```
 
@@ -73,25 +75,33 @@ chmod 600 ~/.config/jev-skill-router/config.json
 | `timeoutMs` | `12000` | skill 发现和 API 调用共用的总超时，范围 `100`～`20000` 毫秒。 |
 | `codexBin` | `codex` | 可执行程序名或绝对路径，不包含 shell 参数；`JEV_CODEX_BIN` 优先。 |
 | `recordSelections` | `true` | 是否在本机保存路由历史；设为 `false` 停止新增记录，已有记录保留。 |
+| `dashboardAutoStart` | `true` | 在任务／消息 hook 中自动启动 Web 服务；设为 `false` 后仍可手动启动。 |
+| `dashboardPort` | `4318` | Web 服务端口，范围 `1`～`65535`，也是手动启动的默认端口。 |
 | `dataDir` | `~/.local/share/jev-skill-router` | 历史目录；自定义值必须是**绝对路径**，JSON 中不会展开 `~`；`JEV_SKILL_ROUTER_DATA_DIR` 优先。 |
 
-通过 `JEV_SKILL_ROUTER_CONFIG` 指定其他配置文件，或设置 `JEV_SKILL_ROUTER_DISABLED=1` 停用选择功能。插件不会自行写入配置或保存用户消息。
+通过 `JEV_SKILL_ROUTER_CONFIG` 指定其他配置文件，或设置 `JEV_SKILL_ROUTER_DISABLED=1` 停用选择功能和 hook 自动启动 Web 服务的行为。插件不会自行写入配置或保存用户消息。
 
 ## Web 页面与历史记录
 
-在仓库目录下，使用 Node.js 22+ 执行：
+安装并信任 hooks 后，启动或恢复 Codex 任务，即可打开 [http://127.0.0.1:4318](http://127.0.0.1:4318)。`SessionStart` 在后台启动页面服务，`UserPromptSubmit` 也会检查服务，停止后自动恢复。Codex 没有插件安装完成事件，因此实际启动时机是首次执行已信任的任务／消息 hook，而非安装命令执行期间。插件不会自动弹出浏览器标签页。
+
+多个任务共用一个服务。hook 仅复用历史目录相同的 Jev 页面，不会为抢占端口停止其他进程。若端口已占用，将 `dashboardPort` 改为可用端口即可。启动失败只显示简短状态，不影响 skill 选择。页面服务本身不需要 Jev 密钥。
+
+自动启动的进程在连续 30 分钟没有页面请求或 hook 检查后退出。关闭浏览器、停用自动启动或卸载插件后，已运行的进程会等待空闲超时；可见页面的定时刷新会使服务保持运行。配置在服务启动时读取，历史记录保留在磁盘上。
+
+如需手动启动，将 `dashboardAutoStart` 设为 `false`，在仓库目录下使用 Node.js 22+ 执行：
 
 ```sh
 npm run dashboard
 ```
 
-打开 [http://127.0.0.1:4318](http://127.0.0.1:4318)。该命令直接使用已提交的打包脚本，查看页面无需 `npm install`。如需指定端口：
+该命令直接使用已提交的打包脚本，查看页面无需 `npm install`。手动启动时可覆盖配置中的端口：
 
 ```sh
 npm run dashboard -- --port 4320
 ```
 
-也可用 Node.js 执行已安装插件的 `scripts/router.mjs --dashboard`。插件根目录以 `/hooks` 显示的实际路径为准，版本更新会改变缓存目录。页面进程与 hook 需要使用同一份配置和历史目录。页面服务只读，仅监听 `127.0.0.1`，不加载外部资源，也不请求 Jev。浏览时保持终端运行，按 `Ctrl+C` 停止。
+也可用 Node.js 执行已安装插件的 `scripts/router.mjs --dashboard`。插件根目录以 `/hooks` 显示的实际路径为准，版本更新会改变缓存目录。页面进程与 hook 需要使用同一份配置和历史目录。页面服务只读，仅监听 `127.0.0.1`，不加载外部资源，也不请求 Jev。手动启动的服务需要保持终端运行，按 `Ctrl+C` 停止；自动启动的服务无需保持终端。
 
 概览提供今天／最近 7／30／90 天与项目筛选，展示选择次数、选择命中率、选中过的 skill 数量、平均耗时和每日结果柱状图。排行展示每个 skill 的选中次数、选择率、平均相关性概率及最近选中时间。点击 skill 可筛选记录，展开记录可查看完整路径、概率、候选数量、模型、阈值、任务 ID 和安全错误码。历史支持分页。页面可见且空闲时每 15 秒刷新；聚焦控件或展开详情期间暂停自动刷新。
 
@@ -120,7 +130,7 @@ codex plugin marketplace upgrade jev-skill-router
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-若 `/hooks` 提示，审查并信任更新后的 hook，然后新建 Codex 任务。历史记录位于插件缓存之外，升级时会保留。
+若 `/hooks` 提示，审查并信任更新后的 hooks，然后启动或恢复 Codex 任务。从手动启动页面的旧版本升级时，先在原终端按 `Ctrl+C` 停止旧进程，以便自动启动使用该端口。历史记录位于插件缓存之外，升级时会保留。
 
 ## 工作方式
 
@@ -162,7 +172,7 @@ node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit"
 
 这会将示例消息和本机符合条件的 skill 元数据发送给 TypeSafe。成功时返回 `hookSpecificOutput.additionalContext`，降级时返回 `systemMessage`。hook 降级时仍以成功状态退出，让原任务继续进行。
 
-自检使用合成 Jev 响应和临时文件，覆盖 app-server 协议、策略过滤、链接去重、打包后 CLI、请求结构、多 skill 选择、分批、无效响应、超时、安全降级、私密与并发记录、历史筛选、统计分母、分页及本地 HTTP 访问限制。HTTP 检查需要允许监听临时本地端口。它**不代表** Jev 选择准确率评测或真实 API 访问验证。
+自检使用合成 Jev 响应和临时文件，覆盖 app-server 协议、策略过滤、链接去重、打包后 CLI、请求结构、多 skill 选择、分批、无效响应、超时、安全降级、私密与并发记录、历史筛选、统计分母、分页及本地 HTTP 访问限制；同时验证脱离终端启动、并发 hooks、服务复用、停止后恢复、关闭自动启动、空闲退出和端口冲突处理。HTTP 检查需要允许监听临时本地端口。它**不代表** Jev 选择准确率评测或真实 API 访问验证。
 
 ## 参考资料
 

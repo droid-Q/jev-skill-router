@@ -1,6 +1,6 @@
 {
   "name": "jev-skill-router",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "esbuild src/router.mjs --bundle --platform=node --format=esm --target=node22 --legal-comments=inline --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=plugins/jev-skill-router/scripts/router.mjs",
-    "test": "node test/router.test.mjs && node test/analytics.test.mjs",
+    "test": "node test/router.test.mjs && node test/analytics.test.mjs && node test/autostart.test.mjs",
     "dashboard": "node plugins/jev-skill-router/scripts/router.mjs --dashboard",
     "dashboard:demo": "node scripts/demo.mjs",
     "skills": "node plugins/jev-skill-router/scripts/router.mjs --list"

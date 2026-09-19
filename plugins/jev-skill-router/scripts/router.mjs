@@ -7363,10 +7363,10 @@ var require_dist = __commonJS({
 
 // src/router.mjs
 var import_yaml = __toESM(require_dist(), 1);
-import { spawn } from "node:child_process";
+import { spawn as spawn2 } from "node:child_process";
 import { readFile as readFile2, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute as isAbsolute2, join as join2, resolve } from "node:path";
+import { dirname, isAbsolute as isAbsolute2, join as join2, resolve as resolve2 } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -7512,6 +7512,9 @@ function summarize(history, { days, project = "", search = "", status = "", page
 // src/dashboard.mjs
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 // src/dashboard-page.mjs
 var dashboard_page_default = String.raw`<!doctype html>
@@ -7695,7 +7698,8 @@ setInterval(()=>{if(!document.hidden && !$('refresh').disabled && !document.quer
 
 // src/dashboard.mjs
 var hashes = [...dashboard_page_default.matchAll(/<(?:script|style)>([\s\S]*?)<\/(?:script|style)>/gu)].map((match) => "'sha256-" + createHash("sha256").update(match[1]).digest("base64") + "'");
-function startDashboard({ dataDir, recordingEnabled = true, routingEnabled = true, port = 4318, demo = false }) {
+function startDashboard({ dataDir, recordingEnabled = true, routingEnabled = true, port = 4318, demo = false, idleTimeoutMs = 0 }) {
+  let idleTimer;
   const server = createServer(async (request, response) => {
     const authority = `127.0.0.1:${server.address().port}`;
     const host = request.headers.host;
@@ -7715,7 +7719,16 @@ function startDashboard({ dataDir, recordingEnabled = true, routingEnabled = tru
       response.setHeader("Allow", "GET");
       return send(405, { error: "Read-only dashboard." });
     }
+    idleTimer?.refresh();
     const url = new URL(request.url, `http://${authority}`);
+    if (url.pathname === "/api/health") return send(200, {
+      service: "jev-skill-router",
+      dataDir: resolve(dataDir),
+      recordingEnabled,
+      routingEnabled,
+      demo,
+      pid: process.pid
+    });
     if (url.pathname === "/") return send(200, dashboard_page_default, "text/html; charset=utf-8");
     if (url.pathname === "/favicon.ico") return send(204, "");
     if (url.pathname !== "/api/analytics") return send(404, { error: "Not found." });
@@ -7745,16 +7758,70 @@ function startDashboard({ dataDir, recordingEnabled = true, routingEnabled = tru
     }
   });
   server.requestTimeout = 1e4;
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     const onError = (error) => reject(Object.assign(new Error("Dashboard could not start"), {
       code: error.code === "EADDRINUSE" ? "JEV_DASHBOARD_PORT_IN_USE" : "JEV_DASHBOARD_UNAVAILABLE"
     }));
     server.once("error", onError);
     server.listen(port, "127.0.0.1", () => {
       server.removeListener("error", onError);
-      resolve2(server);
+      if (idleTimeoutMs) {
+        idleTimer = setTimeout(() => {
+          server.closeAllConnections();
+          server.close();
+        }, idleTimeoutMs);
+        idleTimer.unref();
+        server.once("close", () => clearTimeout(idleTimer));
+      }
+      resolve3(server);
     });
   });
+}
+async function ensureDashboard(config, entry) {
+  if (!config.dashboardAutoStart) return;
+  const conflict = () => Object.assign(new Error("Dashboard port is occupied"), { code: "JEV_DASHBOARD_PORT_IN_USE" });
+  const ready = async () => {
+    try {
+      const response = await fetch(`http://127.0.0.1:${config.dashboardPort}/api/health`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(300)
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw conflict();
+      }
+      const chunks = [];
+      let bytes = 0;
+      for await (const chunk of response.body) {
+        bytes += chunk.length;
+        if (bytes > 16384) throw conflict();
+        chunks.push(chunk);
+      }
+      const health = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      if (health.service !== "jev-skill-router" || health.demo !== false || health.dataDir !== resolve(config.dataDir)) throw conflict();
+      return true;
+    } catch (error) {
+      if (error.cause?.code === "ECONNREFUSED") return false;
+      throw conflict();
+    }
+  };
+  if (await ready()) return;
+  const child = spawn(process.execPath, [resolve(entry), "--dashboard-auto"], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+  let failed = false;
+  child.on("error", () => {
+    failed = true;
+  });
+  child.unref();
+  const deadline = Date.now() + 2e3;
+  while (!failed && Date.now() < deadline) {
+    await delay(75);
+    if (await ready()) return;
+  }
+  throw Object.assign(new Error("Dashboard did not start"), { code: "JEV_DASHBOARD_UNAVAILABLE" });
 }
 
 // src/router.mjs
@@ -7778,14 +7845,16 @@ async function loadConfig(env = process.env) {
     timeoutMs: saved.timeoutMs ?? 12e3,
     codexBin: env.JEV_CODEX_BIN ?? saved.codexBin ?? "codex",
     recordSelections: saved.recordSelections ?? true,
+    dashboardAutoStart: saved.dashboardAutoStart ?? true,
+    dashboardPort: saved.dashboardPort ?? 4318,
     dataDir: env.JEV_SKILL_ROUTER_DATA_DIR ?? saved.dataDir ?? join2(homedir(), ".local", "share", "jev-skill-router")
   };
-  if (Object.keys(saved).some((key) => !Object.hasOwn(config, key)) || typeof config.apiKey !== "string" || /[\r\n]/u.test(config.apiKey) || typeof config.model !== "string" || !/^jev-[\w.-]+$/u.test(config.model) || !Number.isFinite(config.threshold) || config.threshold <= 0.5 || config.threshold > 1 || !Number.isInteger(config.maxSkills) || config.maxSkills < 1 || config.maxSkills > 20 || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 100 || config.timeoutMs > 2e4 || typeof config.codexBin !== "string" || !config.codexBin.trim() || typeof config.recordSelections !== "boolean" || typeof config.dataDir !== "string" || !isAbsolute2(config.dataDir) || config.dataDir.includes("\0")) throw fail("JEV_CONFIG_INVALID");
+  if (Object.keys(saved).some((key) => !Object.hasOwn(config, key)) || typeof config.apiKey !== "string" || /[\r\n]/u.test(config.apiKey) || typeof config.model !== "string" || !/^jev-[\w.-]+$/u.test(config.model) || !Number.isFinite(config.threshold) || config.threshold <= 0.5 || config.threshold > 1 || !Number.isInteger(config.maxSkills) || config.maxSkills < 1 || config.maxSkills > 20 || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 100 || config.timeoutMs > 2e4 || typeof config.codexBin !== "string" || !config.codexBin.trim() || typeof config.recordSelections !== "boolean" || typeof config.dataDir !== "string" || typeof config.dashboardAutoStart !== "boolean" || !Number.isInteger(config.dashboardPort) || config.dashboardPort < 1 || config.dashboardPort > 65535 || !isAbsolute2(config.dataDir) || config.dataDir.includes("\0")) throw fail("JEV_CONFIG_INVALID");
   return config;
 }
 function readCatalog(cwd, { codexBin, signal }) {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(codexBin, ["app-server", "--stdio"], {
+    const child = spawn2(codexBin, ["app-server", "--stdio"], {
       cwd,
       signal,
       stdio: ["pipe", "pipe", "pipe"]
@@ -7831,13 +7900,13 @@ function readCatalog(cwd, { codexBin, signal }) {
         send({ id: 2, method: "skills/list", params: { cwds: [cwd], forceReload: true } });
       } else {
         const data = message.result?.data;
-        const entry = Array.isArray(data) ? data.find((item) => typeof item?.cwd === "string" && resolve(item.cwd) === cwd) : null;
+        const entry = Array.isArray(data) ? data.find((item) => typeof item?.cwd === "string" && resolve2(item.cwd) === cwd) : null;
         if (!entry || !Array.isArray(entry.skills)) return finish(fail("JEV_CATALOG_INVALID"));
         finish(null, entry);
       }
     });
     send({ id: 1, method: "initialize", params: {
-      clientInfo: { name: "jev-skill-router", version: "0.2.0" },
+      clientInfo: { name: "jev-skill-router", version: "0.3.0" },
       capabilities: { experimentalApi: true }
     } });
   });
@@ -7973,7 +8042,7 @@ async function route(input, config, { discover = readCatalog, fetchImpl = fetch,
     version: 1,
     id: randomUUID(),
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    cwd: resolve(input.cwd),
+    cwd: resolve2(input.cwd),
     sessionId: typeof input.session_id === "string" && input.session_id.length <= 200 ? input.session_id : null,
     model: config.model,
     threshold: config.threshold,
@@ -7989,7 +8058,7 @@ async function route(input, config, { discover = readCatalog, fetchImpl = fetch,
   try {
     if (!config.apiKey.trim()) throw fail("JEV_NO_API_KEY");
     const signal = AbortSignal.timeout(config.timeoutMs);
-    const catalog = await discover(resolve(input.cwd), { codexBin: config.codexBin, signal });
+    const catalog = await discover(resolve2(input.cwd), { codexBin: config.codexBin, signal });
     const skills = await eligibleSkills(catalog);
     event.candidateCount = skills.length;
     signal.throwIfAborted();
@@ -8034,23 +8103,25 @@ function fallback(error) {
 async function main() {
   if (process.env.JEV_SKILL_ROUTER_DISABLED === "1" && process.argv.length === 2) return {};
   const config = await loadConfig();
-  if (process.argv[2] === "--dashboard") {
+  if (["--dashboard", "--dashboard-auto"].includes(process.argv[2])) {
+    const automatic = process.argv[2] === "--dashboard-auto";
     const args = process.argv.slice(3);
-    if (args.length && (args.length !== 2 || args[0] !== "--port" || !/^\d+$/u.test(args[1]))) throw fail("JEV_ARGUMENT_INVALID");
-    const port = args.length ? Number(args[1]) : 4318;
+    if (args.length && (automatic || args.length !== 2 || args[0] !== "--port" || !/^\d+$/u.test(args[1]))) throw fail("JEV_ARGUMENT_INVALID");
+    const port = args.length ? Number(args[1]) : config.dashboardPort;
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw fail("JEV_ARGUMENT_INVALID");
     const server = await startDashboard({
       dataDir: config.dataDir,
       recordingEnabled: config.recordSelections,
       routingEnabled: process.env.JEV_SKILL_ROUTER_DISABLED !== "1",
-      port
+      port,
+      idleTimeoutMs: automatic ? 30 * 60 * 1e3 : 0
     });
     process.stdout.write(`Jev Skill Router dashboard: http://127.0.0.1:${server.address().port}
 `);
     return;
   }
   if (process.argv[2] === "--list") {
-    const catalog = await readCatalog(resolve(process.cwd()), {
+    const catalog = await readCatalog(resolve2(process.cwd()), {
       codexBin: config.codexBin,
       signal: AbortSignal.timeout(config.timeoutMs)
     });
@@ -8064,9 +8135,16 @@ async function main() {
     };
   }
   if (process.argv.length > 2) throw fail("JEV_ARGUMENT_INVALID");
-  return route(JSON.parse(await boundedText(process.stdin, 1024 * 1024)), config);
+  const input = JSON.parse(await boundedText(process.stdin, 1024 * 1024));
+  const autoStart = isObject(input) && ["SessionStart", "UserPromptSubmit"].includes(input.hook_event_name) && typeof input.cwd === "string" && isAbsolute2(input.cwd) && (input.hook_event_name === "SessionStart" || typeof input.prompt === "string" && input.prompt.trim());
+  const [output, warning] = await Promise.all([
+    route(input, config).catch(fallback),
+    autoStart ? ensureDashboard(config, process.argv[1]).catch((error) => `Jev dashboard unavailable (${errorCode(error)}). Check dashboardPort or start it manually; skill routing continues.`) : void 0
+  ]);
+  if (warning) output.systemMessage = [output.systemMessage, warning].filter(Boolean).join(" ");
+  return output;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve2(process.argv[1])).href) {
   main().catch((error) => {
     if (process.argv.length > 2) process.exitCode = 1;
     return fallback(error);

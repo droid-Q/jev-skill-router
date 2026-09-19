@@ -8,7 +8,7 @@
 - **Local selection history** — record selections, no matches, empty catalogs, and routing failures, together with project, session, model, threshold, and latency.
 - **Web analytics** — inspect selection rates, daily trends, skill rankings, average relevance, and expandable records. Filter by time, project, skill, or outcome.
 - **English / Chinese UI** — switch language and light/dark appearance; the dashboard also works on mobile.
-- **No extra service required for recording** — history is written by the hook. Start the dashboard only when you want to inspect it.
+- **Automatic dashboard startup** — start or resume a Codex task and open the local dashboard. Later messages restart it if needed; no terminal command is required.
 
 ### Dashboard preview
 
@@ -25,11 +25,11 @@ The screenshots below use **synthetic demo data**, not measured Jev accuracy or 
 
 ## Requirements
 
-- Codex CLI with plugin hooks, `UserPromptSubmit`, and app-server `skills/list`. Developed against **0.154.0**.
+- Codex CLI with plugin hooks, `SessionStart`, `UserPromptSubmit`, and app-server `skills/list`. Developed against **0.154.0**.
 - **Node.js 22+** available to the process running Codex.
 - A TypeSafe API key with access to Jev.
 
-The shipped hook is bundled. Plugin users do **not** need `npm install`, Python, an MCP server, or a separate background service.
+The shipped hook is bundled. Plugin users do **not** need `npm install`, Python, an MCP server, or a separately installed service.
 
 ## Install
 
@@ -38,7 +38,7 @@ codex plugin marketplace add https://github.com/droid-Q/jev-skill-router.git
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-Configure the key as described below. Open `/hooks` in the Codex CLI and review/trust this plugin's `UserPromptSubmit` command. Installing a plugin does not automatically trust its hooks. Start a new Codex task after installation; the desktop app and CLI must use the same local Codex configuration.
+Configure the key as described below. Open `/hooks` in the Codex CLI and review/trust this plugin's `SessionStart` and `UserPromptSubmit` commands. Installing a plugin does not automatically trust its hooks. Start or resume a Codex task, then open [http://127.0.0.1:4318](http://127.0.0.1:4318). The desktop app and CLI must use the same local Codex configuration.
 
 ## Configure
 
@@ -52,7 +52,9 @@ Set `TYPESAFE_API_KEY` in the environment that starts Codex, or create `~/.confi
   "maxSkills": 3,
   "timeoutMs": 12000,
   "codexBin": "codex",
-  "recordSelections": true
+  "recordSelections": true,
+  "dashboardAutoStart": true,
+  "dashboardPort": 4318
 }
 ```
 
@@ -73,25 +75,33 @@ For the desktop app, prefer the configuration file: apps launched from Finder ma
 | `timeoutMs` | `12000` | Shared discovery/API deadline, from `100` to `20000` milliseconds. |
 | `codexBin` | `codex` | Executable name or absolute path; no shell arguments. Overridden by `JEV_CODEX_BIN`. |
 | `recordSelections` | `true` | Save routing history locally. `false` stops new records without deleting existing history. |
+| `dashboardAutoStart` | `true` | Start the local dashboard from session/prompt hooks. `false` keeps manual startup available. |
+| `dashboardPort` | `4318` | Dashboard port, from `1` to `65535`; also the default for manual startup. |
 | `dataDir` | `~/.local/share/jev-skill-router` | History directory. A custom value must be an **absolute path** (`~` is not expanded in JSON). Overridden by `JEV_SKILL_ROUTER_DATA_DIR`. |
 
-Set `JEV_SKILL_ROUTER_CONFIG` to use another configuration file, or `JEV_SKILL_ROUTER_DISABLED=1` to disable routing. The plugin does not write settings or store prompts.
+Set `JEV_SKILL_ROUTER_CONFIG` to use another configuration file, or `JEV_SKILL_ROUTER_DISABLED=1` to disable routing and hook-triggered dashboard startup. The plugin does not write settings or store prompts.
 
 ## Web dashboard and history
 
-From the repository checkout, with Node.js 22+:
+After installing and trusting the hooks, start or resume a Codex task and open [http://127.0.0.1:4318](http://127.0.0.1:4318). `SessionStart` starts the dashboard in the background; `UserPromptSubmit` also checks it and restarts it if needed. Codex has no plugin-install event, so startup happens on the first trusted session/prompt hook, rather than inside the installation command. Browser tabs are not opened automatically.
+
+Concurrent tasks share the same service. The hook only reuses a Jev dashboard serving the same history directory; it never stops another process to claim a port. If the port is occupied, set `dashboardPort` to an unused port. Startup failures produce a short status message and leave skill routing running. The dashboard itself requires no Jev key.
+
+The automatic process exits after 30 minutes without a local dashboard request or hook check. Closing the browser, disabling automatic startup, or uninstalling the plugin leaves an already-running process to reach that idle timeout; a visible dashboard tab keeps it alive through its refresh requests. Configuration is read when the server starts. History remains on disk.
+
+For manual startup, set `dashboardAutoStart` to `false` and run from the repository checkout with Node.js 22+:
 
 ```sh
 npm run dashboard
 ```
 
-Open [http://127.0.0.1:4318](http://127.0.0.1:4318). This uses the committed bundle, so `npm install` is unnecessary for viewing the dashboard. To choose another port:
+This uses the committed bundle, so `npm install` is unnecessary for viewing the dashboard. To override the configured port for a manual server:
 
 ```sh
 npm run dashboard -- --port 4320
 ```
 
-You can also run the installed plugin's `scripts/router.mjs --dashboard` with Node.js. Use the exact plugin root shown in `/hooks`; cache directories change between plugin versions. The dashboard and hook must use the same config and data directory. The dashboard is read-only, listens only on `127.0.0.1`, loads no external assets, and makes no calls to Jev. Keep its terminal open while viewing it; stop with `Ctrl+C`.
+You can also run the installed plugin's `scripts/router.mjs --dashboard` with Node.js. Use the exact plugin root shown in `/hooks`; cache directories change between plugin versions. The dashboard and hook must use the same config and data directory. The dashboard is read-only, listens only on `127.0.0.1`, loads no external assets, and makes no calls to Jev. A manually started server stays in its terminal until stopped with `Ctrl+C`; an automatically started server needs no terminal.
 
 The overview offers today / 7 / 30 / 90-day windows, project filters, selection counts, selection rate, distinct selected skills, average latency, and daily outcome bars. Rankings show each skill's selection count, rate, mean relevance probability, and most recent selection. Click a skill to filter records, or expand a record to see exact paths, probabilities, candidate count, model, threshold, session, and a safe error code. History is paginated. The page refreshes every 15 seconds while visible and idle; refresh pauses during focused controls or expanded-record inspection.
 
@@ -120,7 +130,7 @@ codex plugin marketplace upgrade jev-skill-router
 codex plugin add jev-skill-router@jev-skill-router
 ```
 
-Review/trust the updated hook in `/hooks` if requested, then start a new Codex task. Selection history survives updates because it lives outside the plugin cache.
+Review/trust the updated hooks in `/hooks` if requested, then start or resume a Codex task. When upgrading from a version with a manually started dashboard, stop that old terminal process with `Ctrl+C` first so automatic startup can use its port. Selection history survives updates because it lives outside the plugin cache.
 
 ## Behavior
 
@@ -162,7 +172,7 @@ node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit"
 
 This sends the sample prompt and your eligible skill metadata to TypeSafe. Success returns `hookSpecificOutput.additionalContext`; a fallback returns `systemMessage`. Hooks exit successfully on fallback so the original task can proceed.
 
-The self-check covers the app-server protocol, policy filtering, symlink deduplication, bundled CLI, request shape, multi-skill selection, batching, invalid responses, timeouts, safe fallback, private/concurrent logging, history filtering, metric denominators, pagination, and loopback HTTP access controls. It uses synthetic Jev responses and temporary files; the HTTP checks need permission to bind a temporary localhost port. It does **not** measure Jev's selection accuracy or prove real API access.
+The self-check covers the app-server protocol, policy filtering, symlink deduplication, bundled CLI, request shape, multi-skill selection, batching, invalid responses, timeouts, safe fallback, private/concurrent logging, history filtering, metric denominators, pagination, and loopback HTTP access controls. It also checks detached startup, concurrent hooks, service reuse, restart after exit, opt-out, idle shutdown, and safe port conflicts. It uses synthetic Jev responses and temporary files; the HTTP checks need permission to bind temporary localhost ports. It does **not** measure Jev's selection accuracy or prove real API access.
 
 ## References
 

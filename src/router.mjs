@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { parseDocument } from 'yaml';
 import { randomUUID } from 'node:crypto';
 import { appendSelection } from './records.mjs';
-import { startDashboard } from './dashboard.mjs';
+import { ensureDashboard, startDashboard } from './dashboard.mjs';
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const fail = code => Object.assign(new Error(code), { code });
@@ -30,6 +30,8 @@ export async function loadConfig(env = process.env) {
     timeoutMs: saved.timeoutMs ?? 12000,
     codexBin: env.JEV_CODEX_BIN ?? saved.codexBin ?? 'codex',
     recordSelections: saved.recordSelections ?? true,
+    dashboardAutoStart: saved.dashboardAutoStart ?? true,
+    dashboardPort: saved.dashboardPort ?? 4318,
     dataDir: env.JEV_SKILL_ROUTER_DATA_DIR ?? saved.dataDir ?? join(homedir(), '.local', 'share', 'jev-skill-router'),
   };
   if (Object.keys(saved).some(key => !Object.hasOwn(config, key)) ||
@@ -40,6 +42,8 @@ export async function loadConfig(env = process.env) {
       !Number.isInteger(config.timeoutMs) || config.timeoutMs < 100 || config.timeoutMs > 20000 ||
       typeof config.codexBin !== 'string' || !config.codexBin.trim() ||
       typeof config.recordSelections !== 'boolean' || typeof config.dataDir !== 'string' ||
+      typeof config.dashboardAutoStart !== 'boolean' || !Number.isInteger(config.dashboardPort) ||
+      config.dashboardPort < 1 || config.dashboardPort > 65535 ||
       !isAbsolute(config.dataDir) || config.dataDir.includes('\0')) throw fail('JEV_CONFIG_INVALID');
   return config;
 }
@@ -91,7 +95,7 @@ export function readCatalog(cwd, { codexBin, signal }) {
       }
     });
     send({ id: 1, method: 'initialize', params: {
-      clientInfo: { name: 'jev-skill-router', version: '0.2.0' },
+      clientInfo: { name: 'jev-skill-router', version: '0.3.0' },
       capabilities: { experimentalApi: true },
     } });
   });
@@ -277,13 +281,14 @@ export function fallback(error) {
 async function main() {
   if (process.env.JEV_SKILL_ROUTER_DISABLED === '1' && process.argv.length === 2) return {};
   const config = await loadConfig();
-  if (process.argv[2] === '--dashboard') {
+  if (['--dashboard', '--dashboard-auto'].includes(process.argv[2])) {
+    const automatic = process.argv[2] === '--dashboard-auto';
     const args = process.argv.slice(3);
-    if (args.length && (args.length !== 2 || args[0] !== '--port' || !/^\d+$/u.test(args[1]))) throw fail('JEV_ARGUMENT_INVALID');
-    const port = args.length ? Number(args[1]) : 4318;
+    if (args.length && (automatic || args.length !== 2 || args[0] !== '--port' || !/^\d+$/u.test(args[1]))) throw fail('JEV_ARGUMENT_INVALID');
+    const port = args.length ? Number(args[1]) : config.dashboardPort;
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw fail('JEV_ARGUMENT_INVALID');
     const server = await startDashboard({ dataDir: config.dataDir, recordingEnabled: config.recordSelections,
-      routingEnabled: process.env.JEV_SKILL_ROUTER_DISABLED !== '1', port });
+      routingEnabled: process.env.JEV_SKILL_ROUTER_DISABLED !== '1', port, idleTimeoutMs: automatic ? 30 * 60 * 1000 : 0 });
     process.stdout.write(`Jev Skill Router dashboard: http://127.0.0.1:${server.address().port}\n`);
     return;
   }
@@ -297,7 +302,17 @@ async function main() {
       skills: skills.map(({ name, path }) => ({ name, path })) };
   }
   if (process.argv.length > 2) throw fail('JEV_ARGUMENT_INVALID');
-  return route(JSON.parse(await boundedText(process.stdin, 1024 * 1024)), config);
+  const input = JSON.parse(await boundedText(process.stdin, 1024 * 1024));
+  const autoStart = isObject(input) && ['SessionStart', 'UserPromptSubmit'].includes(input.hook_event_name) &&
+    typeof input.cwd === 'string' && isAbsolute(input.cwd) &&
+    (input.hook_event_name === 'SessionStart' || (typeof input.prompt === 'string' && input.prompt.trim()));
+  const [output, warning] = await Promise.all([
+    route(input, config).catch(fallback),
+    autoStart ? ensureDashboard(config, process.argv[1]).catch(error =>
+      `Jev dashboard unavailable (${errorCode(error)}). Check dashboardPort or start it manually; skill routing continues.`) : undefined,
+  ]);
+  if (warning) output.systemMessage = [output.systemMessage, warning].filter(Boolean).join(' ');
+  return output;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

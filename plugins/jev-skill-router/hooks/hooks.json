@@ -1,6 +1,19 @@
 {
   "description": "Use TypeSafe Jev to select optional skills before each Codex turn.",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/router.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Starting Jev dashboard"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
